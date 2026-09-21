@@ -1,20 +1,30 @@
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { useEffect } from 'react';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { SoundProvider } from './src/feedback/sound';
+import RootNavigator from './src/navigation/RootNavigator';
+import { configureNotifications } from './src/notifications/scheduler';
+import { AppProvider } from './src/state/AppStateContext';
+
+/**
+ * On My Card — a yearly life bingo card where a line of five is a goal.
+ * Built on the five-part app model + the behavioral science of goal achievement.
+ * See DESIGN-FRAMEWORK.md.
+ */
 export default function App() {
+  useEffect(() => {
+    configureNotifications();
+  }, []);
+
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <SafeAreaProvider>
+      <AppProvider>
+        <SoundProvider>
+          <StatusBar style="dark" />
+          <RootNavigator />
+        </SoundProvider>
+      </AppProvider>
+    </SafeAreaProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});

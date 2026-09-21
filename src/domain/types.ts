@@ -1,0 +1,143 @@
+/**
+ * On My Card — core data model (schema v4).
+ *
+ * One card, one year: a fixed 5×5 bingo card of comfort-zone challenges and new
+ * experiences, built by swiping through a curated bank of ideas (see tileBank.ts) rather
+ * than typed in. The centre cell (12) is a permanent FREE space. Completing a line
+ * (row/column/diagonal) is a bingo — a checkpoint against the reward ladder; the card is
+ * complete when every tile on it is crossed off.
+ *
+ * Plain JSON so it round-trips through the Repository (local now, Supabase later).
+ */
+
+export const SCHEMA_VERSION = 4;
+
+export const GRID = 5;
+export const CELL_COUNT = GRID * GRID; // 25
+export const CENTER = 12; // FREE SPACE
+export const CAPACITY = CELL_COUNT - 1; // 24 fillable tiles
+
+export type LineKey =
+  | 'R0' | 'R1' | 'R2' | 'R3' | 'R4'
+  | 'C0' | 'C1' | 'C2' | 'C3' | 'C4'
+  | 'D0' | 'D1';
+
+export const LINE_KEYS: LineKey[] = ['R0', 'R1', 'R2', 'R3', 'R4', 'C0', 'C1', 'C2', 'C3', 'C4', 'D0', 'D1'];
+
+/** Cell indices for each of the 12 lines (row-major, 0..24). */
+export const LINE_CELLS: Record<LineKey, number[]> = (() => {
+  const out = {} as Record<LineKey, number[]>;
+  for (let r = 0; r < GRID; r++) out[`R${r}` as LineKey] = Array.from({ length: GRID }, (_, c) => r * GRID + c);
+  for (let c = 0; c < GRID; c++) out[`C${c}` as LineKey] = Array.from({ length: GRID }, (_, r) => r * GRID + c);
+  out.D0 = Array.from({ length: GRID }, (_, i) => i * GRID + i); // ↘
+  out.D1 = Array.from({ length: GRID }, (_, i) => i * GRID + (GRID - 1 - i)); // ↙
+  return out;
+})();
+
+export const GOAL_ACCENTS = ['#E4572E', '#2E8B84', '#3D5A80', '#B5179E', '#6A994E', '#C08A2E', '#7B5EA7'] as const;
+
+/** A category tags each tile-bank idea for shuffling variety and card-face colour. */
+export type TileCategory =
+  | 'comfort' | 'adventure' | 'creative' | 'health' | 'career' | 'kindness' | 'fun' | 'mindful';
+
+/** One accent per category, in the order above — the swipe deck's colour wash. */
+export const CATEGORY_ACCENTS: Record<TileCategory, string> = {
+  comfort: '#E4572E',
+  adventure: '#3D5A80',
+  creative: '#B5179E',
+  health: '#2E8B84',
+  career: '#C08A2E',
+  kindness: '#D6558C',
+  fun: '#F5A623',
+  mindful: '#6A994E',
+};
+
+export interface Tile {
+  id: string;
+  cell: number; // 0..24, never CENTER
+  label: string;
+  emoji?: string;
+  note?: string; // shown on long-press / the ⓘ tap
+  category?: TileCategory;
+  /** The tile-bank idea this came from, if any — lets "swap" avoid repeats. Absent for a
+   *  hand-typed tile (the escape hatch on an empty cell). */
+  bankId?: string;
+  doneAt?: number; // set once crossed off
+}
+
+export interface Reward {
+  id: string;
+  bingos: number; // unlocks at this many completed lines
+  text: string;
+  claimedAt?: number;
+}
+
+export interface Card {
+  title: string;
+  year: number;
+  createdAt: number;
+  tiles: Tile[]; // up to 24, from the swipe deck
+  rewards: Reward[];
+}
+
+export type LogKind = 'tile' | 'bingo' | 'card' | 'reward';
+
+export interface LogEntry {
+  id: string;
+  ts: number;
+  kind: LogKind;
+  text: string;
+}
+
+export interface Settings {
+  soundEnabled: boolean;
+  hapticsEnabled: boolean;
+  notificationsEnabled: boolean;
+  weeklyCheckinDay: number; // 0 (Sun) .. 6 (Sat)
+  weeklyCheckinHour: number; // 0..23
+  /** Flips true only once the welcome → swipe-deck → reveal flow is dismissed — kept
+   *  separate from `card` existing so the reveal screen gets to play out before
+   *  RootNavigator swaps to the main app. */
+  onboardingComplete: boolean;
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  soundEnabled: true,
+  hapticsEnabled: true,
+  notificationsEnabled: false,
+  weeklyCheckinDay: 1, // Monday
+  weeklyCheckinHour: 9,
+  onboardingComplete: false,
+};
+
+export interface AppState {
+  schemaVersion: number;
+  /** Null until the welcome → swipe-deck → reveal flow finishes building the first card. */
+  card: Card | null;
+  settings: Settings;
+  log: LogEntry[]; // newest first
+}
+
+/** What a single tile interaction produced — drives the celebration queue. */
+export interface TileOutcome {
+  crossed: boolean;
+  uncrossed: boolean;
+  bonus: boolean;
+  newBingoLines: LineKey[];
+  cardCompleted: boolean;
+  unlockedRewardIds: string[];
+}
+
+export const EMPTY_TILE_OUTCOME: TileOutcome = {
+  crossed: false,
+  uncrossed: false,
+  bonus: false,
+  newBingoLines: [],
+  cardCompleted: false,
+  unlockedRewardIds: [],
+};
+
+export type CelebrationEvent =
+  | { kind: 'bingo'; line: LineKey }
+  | { kind: 'card' }
+  | { kind: 'reward'; rewardId: string };

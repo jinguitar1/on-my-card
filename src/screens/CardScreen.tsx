@@ -1,7 +1,9 @@
-import { useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useAuth } from '../auth/AuthContext';
 import { cardSummary, completedLines, isTileCrossed, nearMissLines, nextReward, tileAt } from '../domain/logic';
 import { CELL_COUNT, CENTER, GRID } from '../domain/types';
 import { Confetti } from '../feedback/Celebration';
@@ -11,11 +13,24 @@ import { useApp } from '../state/AppStateContext';
 import { BingoRail, CardTile, Pill, cardLayout } from '../ui/components';
 import { colors, space, type } from '../ui/theme';
 
+const BANNER_DISMISSED_KEY = 'onmycard:syncBannerDismissed';
+
 export default function CardScreen({ navigation }: any) {
   const { state, pressTile } = useApp();
+  const { status: authStatus } = useAuth();
   const sound = useSound();
   const { width } = useWindowDimensions();
   const card = state.card;
+
+  const [bannerDismissed, setBannerDismissed] = useState(true); // default hidden until we know
+  useEffect(() => {
+    void AsyncStorage.getItem(BANNER_DISMISSED_KEY).then((v) => setBannerDismissed(v === '1'));
+  }, []);
+  const showSyncBanner = authStatus === 'signedOut' && !bannerDismissed;
+  function dismissBanner() {
+    setBannerDismissed(true);
+    void AsyncStorage.setItem(BANNER_DISMISSED_KEY, '1');
+  }
 
   const gridW = Math.min(width - space.lg * 2, 460);
   const layout = useMemo(() => cardLayout(gridW), [gridW]);
@@ -63,6 +78,15 @@ export default function CardScreen({ navigation }: any) {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={type.kicker}>ON MY CARD</Text>
         <Text style={type.display}>{card.title}</Text>
+
+        {showSyncBanner && (
+          <Pressable style={styles.banner} onPress={() => navigation.navigate('SignIn')}>
+            <Text style={styles.bannerText}>☁️ Back up this card — sign in</Text>
+            <Pressable hitSlop={10} onPress={dismissBanner}>
+              <Text style={styles.bannerDismiss}>✕</Text>
+            </Pressable>
+          </Pressable>
+        )}
 
         <View style={styles.statRow}>
           <Pill text={`${summary.bingos} bingo${summary.bingos === 1 ? '' : 's'}`} tone="ink" />
@@ -119,6 +143,19 @@ function truncate(s: string, n: number) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.paper },
   content: { padding: space.lg, paddingBottom: space.xxl * 2, alignItems: 'center' },
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    alignSelf: 'stretch',
+    backgroundColor: colors.goldSoft,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: space.md,
+    marginTop: space.sm,
+  },
+  bannerText: { fontSize: 13, fontWeight: '700', color: colors.goldInk },
+  bannerDismiss: { fontSize: 13, fontWeight: '800', color: colors.goldInk, paddingHorizontal: space.xs },
   statRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs, alignSelf: 'stretch', marginTop: space.sm, marginBottom: space.lg },
   gridWrap: { position: 'relative', alignSelf: 'center', marginBottom: space.sm },
   hint: { ...type.tiny, textAlign: 'center', marginTop: space.xs, marginBottom: space.lg },

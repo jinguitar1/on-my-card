@@ -53,23 +53,45 @@ geometry and color** — the swipe cards lead with emoji + a 2–5 word label; t
 behind a tap, never shown by default.
 
 - [index.ts](index.ts) — entry point; `registerRootComponent(App)`.
-- [App.tsx](App.tsx) — providers only: `SafeAreaProvider` › `AppProvider` › `SoundProvider`
-  › `RootNavigator`; calls `configureNotifications()` once.
+- [App.tsx](App.tsx) — providers only: `SafeAreaProvider` › `AuthProvider` › `AppProvider`
+  › `SoundProvider` › `RootNavigator`; calls `configureNotifications()` once.
 - [src/domain/](src/domain/) — `types.ts` (fixed-grid constants `GRID`/`CELL_COUNT`/
   `CENTER`/`CAPACITY`/`LINE_CELLS`, `TileCategory` + `CATEGORY_ACCENTS`), `logic.ts` (pure
   fixed-grid selectors — `lineLabel`, `isLineComplete`, `bingoCount`, `nearMissLines`,
   `isCardComplete`, reward selectors — nothing persists/mutates), `tileBank.ts` (the
   curated `TileIdea` bank + `shuffle`/`buildDeck`/`randomSuggestions`), `seed.ts`
   (`emptyState()` only — `card: null`).
-- [src/storage/](src/storage/) — `Repository` interface + `LocalRepository` (AsyncStorage
-  JSON blob, key `onmycard:appstate:v4`). `src/storage/index.ts` exports the singleton —
-  **the swap point for a Supabase backend**. `LocalRepository.load()` returns the blob
-  exactly as stored, including its own `schemaVersion` — it must never rewrite that field
-  itself; only `AppStateContext`'s hydrate compares it against the current
-  `SCHEMA_VERSION` and discards a mismatch. (A prior bug here silently upgraded the
-  version number on old-shaped data without transforming it, which crashed the app on old
-  data — fixed by making load a pure passthrough, and the storage key is bumped on every
-  schema change as a second line of defense.)
+- [src/storage/](src/storage/) — `Repository` interface (`load`/`save`/`clear`) +
+  `LocalRepository` (AsyncStorage JSON blob, key `onmycard:appstate:v4`, plus a parallel
+  `:updatedAt` key used for sync conflict resolution). `src/storage/index.ts` exports the
+  singleton, now a **`SyncRepository`** — **local is always the fast path**: `load`/`save`/
+  `clear` hit AsyncStorage only and return before any network call starts; a signed-in push
+  to Supabase happens in the background and never blocks or throws into the UI.
+  `remoteRepository.ts` holds the raw Supabase queries against `public.app_state`
+  (one JSONB row per user, RLS-scoped to `auth.uid()`). `SyncRepository.setUser(userId)`
+  is called by `AppStateContext` on every auth change; `reconcile()` runs once per
+  sign-in — last-write-wins by comparing the remote row's `updated_at` against the local
+  `:updatedAt` marker (a known v1 simplification for the single-device-at-a-time case).
+  `LocalRepository.load()` returns the blob exactly as stored, including its own
+  `schemaVersion` — it must never rewrite that field itself; only `AppStateContext`'s
+  hydrate compares it against the current `SCHEMA_VERSION` and discards a mismatch. (A
+  prior bug here silently upgraded the version number on old-shaped data without
+  transforming it, which crashed the app on old data — fixed by making load a pure
+  passthrough, and the storage key is bumped on every schema change as a second line of
+  defense.)
+- [src/lib/supabaseClient.ts](src/lib/supabaseClient.ts) — the one `createClient()` call
+  (session stored in AsyncStorage, `detectSessionInUrl: false` since sign-in never
+  redirects through a URL). Reads `EXPO_PUBLIC_SUPABASE_URL` / `_ANON_KEY` from `.env`
+  (see `.env.example`; `.env` itself is gitignored).
+- [src/auth/AuthContext.tsx](src/auth/AuthContext.tsx) — `useAuth()`: `session`,
+  `status`, and email-OTP actions (`sendCode`, `verifyCode`, `signOut`). No passwords, no
+  OAuth, no deep links — a user types their email, gets a one-time code (length isn't
+  hardcoded on the client — Supabase's project config decides it, we've seen both 6 and 8
+  digits), types it back (`src/screens/auth/SignInScreen.tsx`, a modal `Stack.Screen`).
+  **Sign-in is always
+  optional** — it never gates onboarding or the tabs (`RootNavigator`'s gate is still
+  only `!settings.onboardingComplete || !state.card`); it's offered from a dismissible
+  banner on `CardScreen` and a permanent row in `SettingsScreen`.
 - [src/state/AppStateContext.tsx](src/state/AppStateContext.tsx) — `useApp()`. All state in
   `useState`, hydrate / debounced-persist / foreground (notif reconcile). Key actions:
   `createCard(kept)`, `renameCard`, `pressTile(cell): TileOutcome`, `setTile`/`clearTile`,
@@ -88,7 +110,7 @@ behind a tap, never shown by default.
   schedules one `WEEKLY` check-in only if a card exists and it's enabled in Settings.
 - [src/navigation/RootNavigator.tsx](src/navigation/RootNavigator.tsx) — onboarding gate
   (`!settings.onboardingComplete || !state.card`) → 3 tabs (Card / Rewards / Settings) +
-  one modal (`TileSheet`). Renders `CelebrationOverlay` at root.
+  two modals (`TileSheet`, `SignIn`). Renders `CelebrationOverlay` at root.
 - [src/screens/](src/screens/) — `OnboardingNavigator.tsx` (welcome/deck/reveal),
   `SwipeDeckScreen.tsx` (the keep/skip deck — `PanResponder` + `Animated.ValueXY`, no
   Reanimated/gesture-handler; a `forwardRef`/`useImperativeHandle` card lets the ✕/✓
@@ -110,3 +132,19 @@ Sound assets are **generated**, not committed as source of truth: `npm run gen:s
 - `.claude/settings.json` enables the official `expo` Claude Code plugin.
 - Native `/ios` and `/android` folders are gitignored (managed workflow / prebuild on
   demand).
+- Copy `.env.example` to `.env` and fill in `EXPO_PUBLIC_SUPABASE_URL` /
+  `EXPO_PUBLIC_SUPABASE_ANON_KEY` (Supabase dashboard → Project Settings → API) before
+  running — `src/lib/supabaseClient.ts` throws immediately at import time if either is
+  missing. `.env` is gitignored; only `.env.example` is committed.
+- Supabase project: `on-my-card` (`shcxirtjmkzffwghucls`, org `jin`, us-west-1). Schema:
+  one migration, `public.app_state` (`user_id` PK / FK to `auth.users`, `state jsonb`,
+  `schema_version`, `updated_at` auto-touched by trigger), RLS scoped to `auth.uid()`.
+  Types in [src/lib/database.types.ts](src/lib/database.types.ts) are generated from
+  this live schema — regenerate (Supabase types tool) rather than hand-editing whenever
+  a migration changes it. That schema also still has empty, unused `boards` / `tiles` /
+  `journal_entries` tables left over from an earlier relational-tables design for this
+  same project — not read or written by this app; drop them in a migration if they're
+  ever confirmed safe to remove. Auth: email OTP only — **the Magic Link email template
+  in the dashboard must include `{{ .Token }}`** (Authentication → Email Templates →
+  Magic Link) or users receive a link instead of the numeric code the sign-in screen
+  expects.

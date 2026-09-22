@@ -2,6 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { AuthProvider } from './src/auth/AuthContext';
 import { SoundProvider } from './src/feedback/sound';
 import RootNavigator from './src/navigation/RootNavigator';
 import { configureNotifications } from './src/notifications/scheduler';
@@ -19,12 +20,14 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <AppProvider>
-        <SoundProvider>
-          <StatusBar style="dark" />
-          <RootNavigator />
-        </SoundProvider>
-      </AppProvider>
+      <AuthProvider>
+        <AppProvider>
+          <SoundProvider>
+            <StatusBar style="dark" />
+            <RootNavigator />
+          </SoundProvider>
+        </AppProvider>
+      </AuthProvider>
     </SafeAreaProvider>
   );
 }

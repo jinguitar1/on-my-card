@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { AppState as RNAppState } from 'react-native';
 
+import { useAuth } from '../auth/AuthContext';
 import { MAX_BINGOS, bingoCount, bonusFor, completedLines, isCardComplete, lineLabel, uid } from '../domain/logic';
 import { emptyState } from '../domain/seed';
 import {
@@ -43,6 +44,7 @@ interface AppApi {
   state: AppState;
   celebration: CelebrationPayload | null;
   dismissCelebration: () => void;
+  syncStatus: { lastSyncedAt: number | null; lastError: string | null };
 
   createCard: (kept: TileSeed[]) => void;
   renameCard: (title: string) => void;
@@ -116,9 +118,11 @@ function defaultRewards(): Reward[] {
 // --- provider -----------------------------------------------------
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const { session } = useAuth();
   const [state, setState] = useState<AppState>(emptyState);
   const [ready, setReady] = useState(false);
   const [queue, setQueue] = useState<CelebrationPayload[]>([]);
+  const [syncStatus, setSyncStatus] = useState(() => repository.getSyncStatus());
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -155,12 +159,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [commitState]);
 
-  // debounced persist
+  // debounced persist — always local-first; SyncRepository fires the background
+  // Supabase push itself once a user is set, so this line is unchanged by sync.
   useEffect(() => {
     if (!ready) return;
     const t = setTimeout(() => void repository.save(stateRef.current), 300);
     return () => clearTimeout(t);
   }, [state, ready]);
+
+  // keep the repository's notion of "who" current, and reconcile once per sign-in
+  useEffect(() => {
+    repository.setUser(session?.user?.id ?? null);
+  }, [session?.user?.id]);
+
+  useEffect(() => {
+    if (!ready || !session?.user) return;
+    let alive = true;
+    void repository.reconcile().then((remote) => {
+      if (alive && remote) commitState(remote);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [session?.user?.id, ready, commitState]);
+
+  // reactive sync status for the Settings screen
+  useEffect(() => repository.subscribe(() => setSyncStatus(repository.getSyncStatus())), []);
 
   useEffect(() => {
     setHapticsEnabled(state.settings.hapticsEnabled);
@@ -329,6 +353,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       state,
       celebration: queue[0] ?? null,
       dismissCelebration,
+      syncStatus,
       createCard,
       renameCard,
       pressTile,
@@ -347,6 +372,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       state,
       queue,
       dismissCelebration,
+      syncStatus,
       createCard,
       renameCard,
       pressTile,

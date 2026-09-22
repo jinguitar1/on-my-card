@@ -2,17 +2,28 @@ import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useAuth } from '../auth/AuthContext';
 import { isCardComplete, prettyDate } from '../domain/logic';
 import { getPermission, listScheduled } from '../notifications/scheduler';
 import { useApp } from '../state/AppStateContext';
-import { Card, GhostButton, Pill } from '../ui/components';
+import { Card, GhostButton, Pill, PrimaryButton } from '../ui/components';
 import { colors, space, type } from '../ui/theme';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HOURS = [7, 9, 12, 18, 20];
 
-export default function SettingsScreen() {
-  const { state, updateSettings, renameCard, resetAll } = useApp();
+function describeSync(status: { lastSyncedAt: number | null; lastError: string | null }): string {
+  if (status.lastError) return `Sync error — will retry (${status.lastError})`;
+  if (!status.lastSyncedAt) return 'Not synced yet';
+  const mins = Math.round((Date.now() - status.lastSyncedAt) / 60000);
+  if (mins < 1) return 'Synced just now';
+  if (mins < 60) return `Synced ${mins}m ago`;
+  return `Synced ${Math.round(mins / 60)}h ago`;
+}
+
+export default function SettingsScreen({ navigation }: any) {
+  const { state, updateSettings, renameCard, resetAll, syncStatus } = useApp();
+  const { status: authStatus, session, signOut } = useAuth();
   const s = state.settings;
   const [scheduled, setScheduled] = useState(0);
   const [title, setTitle] = useState(state.card?.title ?? '');
@@ -105,10 +116,29 @@ export default function SettingsScreen() {
           ))}
         </Card>
 
+        <Text style={styles.section}>Account</Text>
+        <Card style={{ gap: space.sm }}>
+          {authStatus === 'signedIn' && session?.user?.email ? (
+            <>
+              <Text style={styles.rowLabel}>{session.user.email}</Text>
+              <Text style={styles.hint}>{describeSync(syncStatus)}</Text>
+              <GhostButton label="Sign out" onPress={() => signOut()} style={{ marginTop: space.xs }} />
+            </>
+          ) : (
+            <>
+              <Text style={styles.hint}>Not signed in — your card only lives on this device right now.</Text>
+              <PrimaryButton
+                label="Sign in to back up your card"
+                onPress={() => navigation.navigate('SignIn')}
+                style={{ marginTop: space.xs }}
+              />
+            </>
+          )}
+        </Card>
+
         <Text style={styles.section}>Data</Text>
         <Card style={{ gap: space.sm }}>
-          <Text style={styles.hint}>Everything lives on this device. Sync is a future milestone.</Text>
-          <GhostButton danger label="Start over with a new card" onPress={() => resetAll()} style={{ marginTop: space.xs }} />
+          <GhostButton danger label="Start over with a new card" onPress={() => resetAll()} />
         </Card>
 
         <Text style={styles.footer}>On My Card — built on the five-part app model. See DESIGN-FRAMEWORK.md.</Text>

@@ -9,6 +9,7 @@ import CardScreen from '../screens/CardScreen';
 import OnboardingNavigator from '../screens/OnboardingNavigator';
 import RewardsScreen from '../screens/RewardsScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import SignInScreen from '../screens/auth/SignInScreen';
 import TileSheetScreen from '../screens/TileSheetScreen';
 import { colors } from '../ui/theme';
 
@@ -57,6 +58,7 @@ export default function RootNavigator() {
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Tabs" component={Tabs} />
         <Stack.Screen name="TileSheet" component={TileSheetScreen} options={{ presentation: 'modal' }} />
+        <Stack.Screen name="SignIn" component={SignInScreen} options={{ presentation: 'modal' }} />
       </Stack.Navigator>
       <CelebrationOverlay payload={celebration} onDismiss={dismissCelebration} />
     </NavigationContainer>

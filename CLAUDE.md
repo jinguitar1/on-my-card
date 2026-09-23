@@ -141,7 +141,12 @@ Sound assets are **generated**, not committed as source of truth: `npm run gen:s
   `schema_version`, `updated_at` auto-touched by trigger), RLS scoped to `auth.uid()`.
   Types in [src/lib/database.types.ts](src/lib/database.types.ts) are generated from
   this live schema — regenerate (Supabase types tool) rather than hand-editing whenever
-  a migration changes it. That schema also still has empty, unused `boards` / `tiles` /
+  a migration changes it. The table and every column also carry SQL `comment on` text
+  describing the full app flow (onboarding → local core loop → optional sign-in →
+  background sync) — visible in the Supabase dashboard's Table Editor and via
+  `obj_description`/`col_description`, so the flow is documented inside the database
+  itself, not only in this file and DESIGN-FRAMEWORK.md. Keep those three in sync if the
+  flow changes. That schema also still has empty, unused `boards` / `tiles` /
   `journal_entries` tables left over from an earlier relational-tables design for this
   same project — not read or written by this app; drop them in a migration if they're
   ever confirmed safe to remove. Auth: email OTP only — **the Magic Link email template

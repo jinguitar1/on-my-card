@@ -100,6 +100,7 @@ export default function SwipeDeckScreen({ onDone }: { onDone: (kept: TileIdea[])
     <View style={styles.wrap}>
       <View style={styles.progressRow}>
         <ProgressBar pct={progressPct} color={colors.stampGold} height={6} />
+        <Text style={styles.progressHint}>Swipe right to keep · left to skip · {kept.length}/{TARGET_KEEPS} kept</Text>
       </View>
 
       <View style={styles.stack}>
@@ -210,6 +211,7 @@ const SwipeCard = forwardRef<SwipeCardHandle, { idea: TileIdea; onSwipeComplete:
 const styles = StyleSheet.create({
   wrap: { flex: 1, alignItems: 'center', justifyContent: 'space-between', paddingVertical: space.xl },
   progressRow: { width: CARD_W, alignSelf: 'center' },
+  progressHint: { ...type.tiny, textAlign: 'center', marginTop: space.sm },
   stack: { flex: 1, alignItems: 'center', justifyContent: 'center', width: '100%' },
   peek: { position: 'absolute', borderRadius: radius.lg, transform: [{ scale: 0.94 }, { translateY: 10 }] },
   card: {

@@ -2,15 +2,19 @@ import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useInsight, type PeriodType } from '../ai/useInsight';
 import { useAuth } from '../auth/AuthContext';
 import { isCardComplete, prettyDate } from '../domain/logic';
+import { disablePush, getPushPrefs, registerForPush, setCoachHour } from '../notifications/push';
 import { getPermission, listScheduled } from '../notifications/scheduler';
 import { useApp } from '../state/AppStateContext';
-import { Card, GhostButton, Pill, PrimaryButton } from '../ui/components';
+import { Card, GhostButton, Pill, PrimaryButton, Segmented } from '../ui/components';
 import { colors, space, type } from '../ui/theme';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HOURS = [7, 9, 12, 18, 20];
+const COACH_HOURS = [9, 12, 15, 18, 20];
+const MIN_PASSWORD_LEN = 6; // matches Supabase's default minimum
 
 function describeSync(status: { lastSyncedAt: number | null; lastError: string | null }): string {
   if (status.lastError) return `Sync error — will retry (${status.lastError})`;
@@ -23,10 +27,88 @@ function describeSync(status: { lastSyncedAt: number | null; lastError: string |
 
 export default function SettingsScreen({ navigation }: any) {
   const { state, updateSettings, renameCard, resetAll, syncStatus } = useApp();
-  const { status: authStatus, session, signOut } = useAuth();
+  const { status: authStatus, session, signOut, setPassword } = useAuth();
   const s = state.settings;
   const [scheduled, setScheduled] = useState(0);
   const [title, setTitle] = useState(state.card?.title ?? '');
+  const [periodType, setPeriodType] = useState<PeriodType>('weekly');
+  const { insight: reflection, loading: reflectionLoading, refresh: refreshReflection } = useInsight('reflection', { periodType });
+
+  const [editingPassword, setEditingPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordBusy, setPasswordBusy] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSaved, setPasswordSaved] = useState(false);
+
+  const [coachEnabled, setCoachEnabled] = useState(false);
+  const [coachHour, setCoachHourState] = useState(15);
+  const [coachBusy, setCoachBusy] = useState(false);
+  const [coachUnavailable, setCoachUnavailable] = useState(false);
+
+  useEffect(() => {
+    if (authStatus !== 'signedIn') return;
+    let cancelled = false;
+    void getPushPrefs().then((prefs) => {
+      if (cancelled || !prefs) return;
+      setCoachEnabled(prefs.enabled);
+      setCoachHourState(prefs.coachHour);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authStatus]);
+
+  const toggleCoach = async (on: boolean) => {
+    setCoachBusy(true);
+    setCoachUnavailable(false);
+    if (on) {
+      const ok = await registerForPush(coachHour);
+      if (ok) {
+        setCoachEnabled(true);
+      } else {
+        setCoachUnavailable(true);
+      }
+    } else {
+      await disablePush();
+      setCoachEnabled(false);
+    }
+    setCoachBusy(false);
+  };
+
+  const changeCoachHour = async (h: number) => {
+    setCoachHourState(h);
+    if (coachEnabled) await setCoachHour(h);
+  };
+
+  function cancelPasswordEdit() {
+    setEditingPassword(false);
+    setNewPassword('');
+    setConfirmPassword('');
+    setPasswordError(null);
+  }
+
+  async function saveNewPassword() {
+    setPasswordError(null);
+    if (newPassword.length < MIN_PASSWORD_LEN) {
+      setPasswordError(`At least ${MIN_PASSWORD_LEN} characters.`);
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError("Those don't match.");
+      return;
+    }
+    setPasswordBusy(true);
+    const { error } = await setPassword(newPassword);
+    setPasswordBusy(false);
+    if (error) {
+      setPasswordError(error);
+      return;
+    }
+    cancelPasswordEdit();
+    setPasswordSaved(true);
+    setTimeout(() => setPasswordSaved(false), 4000);
+  }
 
   useEffect(() => {
     void listScheduled().then(setScheduled);
@@ -46,6 +128,60 @@ export default function SettingsScreen({ navigation }: any) {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={type.display}>Settings</Text>
+
+        <Text style={[styles.section, { marginTop: space.md }]}>Account</Text>
+        <Card style={{ gap: space.sm }}>
+          {authStatus === 'signedIn' && session?.user?.email ? (
+            <>
+              <Text style={styles.rowLabel}>{session.user.email}</Text>
+              <Text style={styles.hint}>{describeSync(syncStatus)}</Text>
+
+              {editingPassword ? (
+                <View style={{ gap: space.sm, marginTop: space.sm }}>
+                  <TextInput
+                    value={newPassword}
+                    onChangeText={setNewPassword}
+                    placeholder="New password"
+                    placeholderTextColor={colors.inkFaint}
+                    secureTextEntry
+                    textContentType="newPassword"
+                    style={styles.input}
+                  />
+                  <TextInput
+                    value={confirmPassword}
+                    onChangeText={setConfirmPassword}
+                    placeholder="Confirm password"
+                    placeholderTextColor={colors.inkFaint}
+                    secureTextEntry
+                    textContentType="newPassword"
+                    style={styles.input}
+                  />
+                  {passwordError && <Text style={styles.error}>{passwordError}</Text>}
+                  <View style={{ flexDirection: 'row', gap: space.sm }}>
+                    <GhostButton label="Cancel" onPress={cancelPasswordEdit} disabled={passwordBusy} style={{ flex: 1 }} />
+                    <PrimaryButton label={passwordBusy ? 'Saving…' : 'Save'} onPress={saveNewPassword} disabled={passwordBusy} style={{ flex: 2 }} />
+                  </View>
+                </View>
+              ) : (
+                <>
+                  {passwordSaved && <Text style={styles.saved}>Password saved.</Text>}
+                  <GhostButton label="Set or change password" onPress={() => setEditingPassword(true)} style={{ marginTop: space.xs }} />
+                </>
+              )}
+
+              <GhostButton label="Sign out" onPress={() => signOut()} />
+            </>
+          ) : (
+            <>
+              <Text style={styles.hint}>Not signed in — your card only lives on this device right now.</Text>
+              <PrimaryButton
+                label="Sign in to back up your card"
+                onPress={() => navigation.navigate('SignIn')}
+                style={{ marginTop: space.xs }}
+              />
+            </>
+          )}
+        </Card>
 
         {state.card && (
           <>
@@ -102,6 +238,52 @@ export default function SettingsScreen({ navigation }: any) {
           )}
         </Card>
 
+        {authStatus === 'signedIn' && (
+          <>
+            <Text style={styles.section}>Reflection</Text>
+            <Card style={{ gap: space.sm }}>
+              <Segmented
+                options={[
+                  { value: 'weekly', label: 'Weekly' },
+                  { value: 'monthly', label: 'Monthly' },
+                ]}
+                value={periodType}
+                onChange={setPeriodType}
+              />
+              {reflection ? (
+                <Text style={styles.reflectionText}>{reflection.content}</Text>
+              ) : (
+                <Text style={styles.hint}>
+                  {reflectionLoading ? 'Thinking…' : 'Cross off a few tiles, then check back here.'}
+                </Text>
+              )}
+              <GhostButton label="Refresh" onPress={() => refreshReflection(true)} disabled={reflectionLoading} />
+            </Card>
+
+            <Text style={styles.section}>AI Coach</Text>
+            <Card style={{ gap: space.sm }}>
+              <Row label="Daily coaching nudge" hint="A push, timed to your day, pointing at what to do next.">
+                <Switch value={coachEnabled} onValueChange={toggleCoach} disabled={coachBusy} />
+              </Row>
+              {coachEnabled && (
+                <>
+                  <Text style={styles.rowLabel}>Time</Text>
+                  <View style={styles.chips}>
+                    {COACH_HOURS.map((h) => (
+                      <Chip key={h} label={`${h}:00`} on={coachHour === h} onPress={() => changeCoachHour(h)} />
+                    ))}
+                  </View>
+                </>
+              )}
+              {coachUnavailable && (
+                <Text style={styles.hint}>
+                  Push needs a dev-client build, not Expo Go — see CLAUDE.md for the EAS setup steps.
+                </Text>
+              )}
+            </Card>
+          </>
+        )}
+
         <Text style={styles.section}>Activity</Text>
         <Card style={{ gap: space.sm }}>
           {state.log.length === 0 && <Text style={styles.hint}>Nothing yet. Cross a square off.</Text>}
@@ -114,26 +296,6 @@ export default function SettingsScreen({ navigation }: any) {
               </View>
             </View>
           ))}
-        </Card>
-
-        <Text style={styles.section}>Account</Text>
-        <Card style={{ gap: space.sm }}>
-          {authStatus === 'signedIn' && session?.user?.email ? (
-            <>
-              <Text style={styles.rowLabel}>{session.user.email}</Text>
-              <Text style={styles.hint}>{describeSync(syncStatus)}</Text>
-              <GhostButton label="Sign out" onPress={() => signOut()} style={{ marginTop: space.xs }} />
-            </>
-          ) : (
-            <>
-              <Text style={styles.hint}>Not signed in — your card only lives on this device right now.</Text>
-              <PrimaryButton
-                label="Sign in to back up your card"
-                onPress={() => navigation.navigate('SignIn')}
-                style={{ marginTop: space.xs }}
-              />
-            </>
-          )}
         </Card>
 
         <Text style={styles.section}>Data</Text>
@@ -184,6 +346,9 @@ const styles = StyleSheet.create({
   chipOn: { backgroundColor: colors.ink, borderColor: colors.ink },
   chipText: { fontSize: 12, fontWeight: '800', color: colors.inkSoft },
   debug: { ...type.tiny, color: colors.inkFaint },
+  error: { color: colors.danger, fontSize: 13, fontWeight: '600' },
+  saved: { color: colors.success, fontSize: 13, fontWeight: '700', marginTop: space.xs },
+  reflectionText: { fontSize: 14, lineHeight: 20, color: colors.ink },
   logRow: { flexDirection: 'row', gap: space.sm, alignItems: 'flex-start' },
   logIcon: { fontSize: 14, width: 20, textAlign: 'center' },
   footer: { ...type.tiny, marginTop: space.xl, lineHeight: 16, textAlign: 'center' },

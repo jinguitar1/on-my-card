@@ -5,8 +5,9 @@
  *
  * `boards` / `tiles` / `journal_entries` are unused leftovers from an earlier,
  * abandoned relational-tables design for this same project and are not read or
- * written by this app (see CLAUDE.md / DESIGN-FRAMEWORK.md — this app uses the single
- * `app_state` JSONB-per-user table instead).
+ * written by this app (see CLAUDE.md / DESIGN-FRAMEWORK.md — this app uses
+ * `app_state` (JSONB-per-user), `ai_insights` (cached AI coaching/reflection/
+ * breakdown copy), and `push_prefs` (daily-coach push opt-in) instead).
  */
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
@@ -17,6 +18,36 @@ export type Database = {
   };
   public: {
     Tables: {
+      ai_insights: {
+        Row: {
+          content: string;
+          created_at: string;
+          id: string;
+          kind: string;
+          model: string;
+          period: string;
+          user_id: string;
+        };
+        Insert: {
+          content: string;
+          created_at?: string;
+          id?: string;
+          kind: string;
+          model: string;
+          period: string;
+          user_id: string;
+        };
+        Update: {
+          content?: string;
+          created_at?: string;
+          id?: string;
+          kind?: string;
+          model?: string;
+          period?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
       app_state: {
         Row: {
           schema_version: number;
@@ -96,6 +127,36 @@ export type Database = {
             referencedColumns: ['id'];
           },
         ];
+      };
+      push_prefs: {
+        Row: {
+          coach_hour: number;
+          enabled: boolean;
+          expo_push_token: string | null;
+          last_sent_date: string | null;
+          timezone: string;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          coach_hour?: number;
+          enabled?: boolean;
+          expo_push_token?: string | null;
+          last_sent_date?: string | null;
+          timezone?: string;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          coach_hour?: number;
+          enabled?: boolean;
+          expo_push_token?: string | null;
+          last_sent_date?: string | null;
+          timezone?: string;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [];
       };
       tiles: {
         Row: {

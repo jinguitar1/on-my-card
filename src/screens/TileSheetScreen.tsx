@@ -1,12 +1,30 @@
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { useInsight } from '../ai/useInsight';
+import { useAuth } from '../auth/AuthContext';
 import { isTileCrossed, tileAt } from '../domain/logic';
 import { randomSuggestions } from '../domain/tileBank';
 import { CENTER } from '../domain/types';
 import { useApp } from '../state/AppStateContext';
 import { GhostButton, PrimaryButton } from '../ui/components';
 import { categoryColor, colors, radius, space, type } from '../ui/theme';
+
+interface BreakdownStep {
+  title: string;
+  detail: string;
+}
+
+function parseSteps(content: string | undefined): BreakdownStep[] {
+  if (!content) return [];
+  try {
+    const parsed = JSON.parse(content);
+    if (Array.isArray(parsed?.steps)) return parsed.steps;
+  } catch {
+    // ignore — the Edge Function already normalizes this, but stay defensive
+  }
+  return [];
+}
 
 export default function TileSheetScreen({ route, navigation }: any) {
   const cell: number = route.params?.cell ?? 0;
@@ -20,6 +38,13 @@ export default function TileSheetScreen({ route, navigation }: any) {
 
   const [typedLabel, setTypedLabel] = useState('');
   const [showTypeYourOwn, setShowTypeYourOwn] = useState(false);
+
+  const { status: authStatus } = useAuth();
+  const { insight: breakdown, loading: breakdownLoading, refresh: refreshBreakdown } = useInsight('breakdown', {
+    tileId: tile?.id,
+    auto: false,
+  });
+  const steps = useMemo(() => parseSteps(breakdown?.content), [breakdown]);
 
   if (!card || cell === CENTER) {
     navigation.goBack();
@@ -119,6 +144,40 @@ export default function TileSheetScreen({ route, navigation }: any) {
           }}
           style={{ marginTop: space.sm }}
         />
+
+        {authStatus === 'signedIn' && (
+          <View style={styles.breakdownSection}>
+            <Text style={styles.breakdownKicker}>PLAN</Text>
+            {steps.length === 0 ? (
+              breakdownLoading ? (
+                <View style={styles.breakdownLoading}>
+                  <ActivityIndicator color={colors.ink} />
+                  <Text style={styles.lead}>Working out a plan…</Text>
+                </View>
+              ) : (
+                <GhostButton label="🔍 Get a plan for this" onPress={() => refreshBreakdown()} />
+              )
+            ) : (
+              <>
+                {steps.map((step, i) => (
+                  <View key={i} style={styles.stepRow}>
+                    <Text style={styles.stepNum}>{i + 1}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.stepTitle}>{step.title}</Text>
+                      {!!step.detail && <Text style={styles.stepDetail}>{step.detail}</Text>}
+                    </View>
+                  </View>
+                ))}
+                <GhostButton
+                  label={breakdownLoading ? 'Regenerating…' : 'Regenerate'}
+                  onPress={() => refreshBreakdown(true)}
+                  disabled={breakdownLoading}
+                  style={{ marginTop: space.sm }}
+                />
+              </>
+            )}
+          </View>
+        )}
       </ScrollView>
     </View>
   );
@@ -151,4 +210,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.ink,
   },
+  breakdownSection: { marginTop: space.xl },
+  breakdownKicker: { ...type.kicker, marginBottom: space.sm },
+  breakdownLoading: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  stepRow: { flexDirection: 'row', gap: space.sm, marginBottom: space.sm, alignItems: 'flex-start' },
+  stepNum: { ...type.h2, fontSize: 14, width: 20, color: colors.inkSoft },
+  stepTitle: { ...type.body, fontWeight: '700', color: colors.ink },
+  stepDetail: { ...type.tiny, marginTop: 2, lineHeight: 16 },
 });

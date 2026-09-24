@@ -8,17 +8,19 @@ import { Confetti } from '../feedback/Celebration';
 import { triumphHit } from '../feedback/haptics';
 import { useApp } from '../state/AppStateContext';
 import SwipeDeckScreen from './SwipeDeckScreen';
-import { CardTile, PrimaryButton, cardLayout } from '../ui/components';
+import { CardTile, PrimaryButton, RoundButton, cardLayout } from '../ui/components';
 import { categoryColor, colors, space, type } from '../ui/theme';
 
-type Phase = 'welcome' | 'deck' | 'reveal';
+type Phase = 'welcome' | 'intro' | 'deck' | 'reveal';
 
 export default function OnboardingNavigator() {
   const { createCard } = useApp();
   const [phase, setPhase] = useState<Phase>('welcome');
   const [kept, setKept] = useState<TileIdea[]>([]);
 
-  if (phase === 'welcome') return <WelcomeScreen onStart={() => setPhase('deck')} />;
+  if (phase === 'welcome') return <WelcomeScreen onStart={() => setPhase('intro')} />;
+
+  if (phase === 'intro') return <IntroScreen onStart={() => setPhase('deck')} />;
 
   if (phase === 'deck') {
     return (
@@ -54,6 +56,37 @@ function WelcomeScreen({ onStart }: { onStart: () => void }) {
       </View>
       <View style={styles.footer}>
         <PrimaryButton label="Let's build it" onPress={onStart} style={{ flex: 1 }} />
+      </View>
+    </SafeAreaView>
+  );
+}
+
+// --- intro: what's about to happen, before the deck starts flashing ------
+
+function IntroScreen({ onStart }: { onStart: () => void }) {
+  return (
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.introWrap}>
+        <Text style={styles.introKicker}>SETTING UP YOUR CARD</Text>
+        <Text style={styles.introHeadline}>Now let's pick your 24 squares.</Text>
+        <View style={styles.introDemoRow}>
+          <View style={styles.introDemoCol}>
+            <RoundButton icon="✕" tone="danger" onPress={() => {}} size={52} />
+            <Text style={styles.introDemoLabel}>Skip</Text>
+          </View>
+          <View style={styles.introDemoCol}>
+            <RoundButton icon="✓" tone="success" onPress={() => {}} size={52} />
+            <Text style={styles.introDemoLabel}>Keep</Text>
+          </View>
+        </View>
+        <Text style={styles.introSub}>
+          You'll see ideas one at a time — mostly things a little outside your comfort zone. Swipe right (or tap ✓)
+          to keep one on your card, left (or ✕) to skip it. Keep the 24 that feel right — you can edit any square
+          later.
+        </Text>
+      </View>
+      <View style={styles.footer}>
+        <PrimaryButton label="Start swiping" onPress={onStart} style={{ flex: 1 }} />
       </View>
     </SafeAreaView>
   );
@@ -123,6 +156,13 @@ function RevealBody({ kept, onEnter }: { kept: TileIdea[]; onEnter: () => void }
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.paper },
   welcomeWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.xl },
+  introWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.xl },
+  introKicker: { ...type.kicker, marginBottom: space.md },
+  introHeadline: { ...type.display, fontSize: 28, textAlign: 'center', lineHeight: 34, marginBottom: space.xl },
+  introDemoRow: { flexDirection: 'row', gap: space.xxl, marginBottom: space.xl },
+  introDemoCol: { alignItems: 'center', gap: space.xs },
+  introDemoLabel: { ...type.label },
+  introSub: { ...type.body, color: colors.inkSoft, textAlign: 'center', fontSize: 15, lineHeight: 22 },
   burst: { width: 260, height: 260, marginBottom: space.xl },
   welcomeHeadline: { ...type.display, fontSize: 34, textAlign: 'center', lineHeight: 40 },
   welcomeSub: { ...type.body, color: colors.inkSoft, textAlign: 'center', marginTop: space.md, fontSize: 16 },

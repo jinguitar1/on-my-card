@@ -1,8 +1,9 @@
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
+import { useAuth } from '../auth/AuthContext';
 import { CelebrationOverlay } from '../feedback/Celebration';
 import { useApp } from '../state/AppStateContext';
 import CardScreen from '../screens/CardScreen';
@@ -16,11 +17,19 @@ import { colors } from '../ui/theme';
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
-const tabIcon = (emoji: string) => ({ focused }: { focused: boolean }) => (
-  <Text style={{ fontSize: 19, opacity: focused ? 1 : 0.4 }}>{emoji}</Text>
+// `dot`: a small always-on cue (currently used to flag "not signed in" on the
+// Settings tab) so sign-in stays findable from anywhere in the app, not just the
+// Card-tab banner or the Settings row itself.
+const tabIcon = (emoji: string, dot?: boolean) => ({ focused }: { focused: boolean }) => (
+  <View>
+    <Text style={{ fontSize: 19, opacity: focused ? 1 : 0.4 }}>{emoji}</Text>
+    {dot && <View style={styles.tabDot} />}
+  </View>
 );
 
 function Tabs() {
+  const { status } = useAuth();
+  const signedOut = status === 'signedOut';
   return (
     <Tab.Navigator
       screenOptions={{
@@ -33,10 +42,22 @@ function Tabs() {
     >
       <Tab.Screen name="Card" component={CardScreen} options={{ tabBarIcon: tabIcon('🃏') }} />
       <Tab.Screen name="Rewards" component={RewardsScreen} options={{ tabBarIcon: tabIcon('🎟️') }} />
-      <Tab.Screen name="Settings" component={SettingsScreen} options={{ tabBarIcon: tabIcon('⚙️') }} />
+      <Tab.Screen name="Settings" component={SettingsScreen} options={{ tabBarIcon: tabIcon('⚙️', signedOut) }} />
     </Tab.Navigator>
   );
 }
+
+const styles = StyleSheet.create({
+  tabDot: {
+    position: 'absolute',
+    top: -2,
+    right: -4,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.stampGold,
+  },
+});
 
 export default function RootNavigator() {
   const { ready, state, celebration, dismissCelebration } = useApp();

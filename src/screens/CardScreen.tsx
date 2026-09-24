@@ -1,8 +1,8 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useInsight } from '../ai/useInsight';
 import { useAuth } from '../auth/AuthContext';
 import { cardSummary, completedLines, isTileCrossed, nearMissLines, nextReward, tileAt } from '../domain/logic';
 import { CELL_COUNT, CENTER, GRID } from '../domain/types';
@@ -13,8 +13,6 @@ import { useApp } from '../state/AppStateContext';
 import { BingoRail, CardTile, Pill, cardLayout } from '../ui/components';
 import { colors, space, type } from '../ui/theme';
 
-const BANNER_DISMISSED_KEY = 'onmycard:syncBannerDismissed';
-
 export default function CardScreen({ navigation }: any) {
   const { state, pressTile } = useApp();
   const { status: authStatus } = useAuth();
@@ -22,15 +20,12 @@ export default function CardScreen({ navigation }: any) {
   const { width } = useWindowDimensions();
   const card = state.card;
 
-  const [bannerDismissed, setBannerDismissed] = useState(true); // default hidden until we know
-  useEffect(() => {
-    void AsyncStorage.getItem(BANNER_DISMISSED_KEY).then((v) => setBannerDismissed(v === '1'));
-  }, []);
-  const showSyncBanner = authStatus === 'signedOut' && !bannerDismissed;
-  function dismissBanner() {
-    setBannerDismissed(true);
-    void AsyncStorage.setItem(BANNER_DISMISSED_KEY, '1');
-  }
+  // Always visible while signed out — no dismiss. A one-time-dismissible banner is
+  // exactly how people lost track of sign-in before; this is the one screen everyone
+  // opens every time, so it's the one place this can't go missing.
+  const showSyncBanner = authStatus === 'signedOut';
+
+  const { insight: nudge } = useInsight('nudge');
 
   const gridW = Math.min(width - space.lg * 2, 460);
   const layout = useMemo(() => cardLayout(gridW), [gridW]);
@@ -79,12 +74,17 @@ export default function CardScreen({ navigation }: any) {
         <Text style={type.kicker}>ON MY CARD</Text>
         <Text style={type.display}>{card.title}</Text>
 
+        {nudge && (
+          <View style={styles.coach}>
+            <Text style={styles.coachKicker}>COACH</Text>
+            <Text style={styles.coachText}>{nudge.content}</Text>
+          </View>
+        )}
+
         {showSyncBanner && (
           <Pressable style={styles.banner} onPress={() => navigation.navigate('SignIn')}>
             <Text style={styles.bannerText}>☁️ Back up this card — sign in</Text>
-            <Pressable hitSlop={10} onPress={dismissBanner}>
-              <Text style={styles.bannerDismiss}>✕</Text>
-            </Pressable>
+            <Text style={styles.bannerArrow}>→</Text>
           </Pressable>
         )}
 
@@ -143,6 +143,18 @@ function truncate(s: string, n: number) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.paper },
   content: { padding: space.lg, paddingBottom: space.xxl * 2, alignItems: 'center' },
+  coach: {
+    alignSelf: 'stretch',
+    backgroundColor: colors.cardSunk,
+    borderRadius: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.ink,
+    paddingVertical: 10,
+    paddingHorizontal: space.md,
+    marginTop: space.sm,
+  },
+  coachKicker: { ...type.kicker, fontSize: 10, marginBottom: 2 },
+  coachText: { fontSize: 13, lineHeight: 18, color: colors.ink, fontWeight: '600' },
   banner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -155,7 +167,7 @@ const styles = StyleSheet.create({
     marginTop: space.sm,
   },
   bannerText: { fontSize: 13, fontWeight: '700', color: colors.goldInk },
-  bannerDismiss: { fontSize: 13, fontWeight: '800', color: colors.goldInk, paddingHorizontal: space.xs },
+  bannerArrow: { fontSize: 15, fontWeight: '800', color: colors.goldInk, paddingHorizontal: space.xs },
   statRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs, alignSelf: 'stretch', marginTop: space.sm, marginBottom: space.lg },
   gridWrap: { position: 'relative', alignSelf: 'center', marginBottom: space.sm },
   hint: { ...type.tiny, textAlign: 'center', marginTop: space.xs, marginBottom: space.lg },

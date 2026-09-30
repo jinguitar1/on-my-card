@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
@@ -28,16 +28,51 @@ const CARD_H = CARD_W * 1.25;
  * through. Swipe right (or tap ✓) to keep, left (or ✕) to skip. Stops the moment 24 are
  * kept; if the deck runs out first, gives the skipped pile one more shuffled pass, then
  * finishes with whatever's been kept — a few open squares is fine, they're fillable later.
+ *
+ * Resumable: `initialKept`/`initialRejected`/`initialUsedSecondPass` seed a paused
+ * session back in (the caller is responsible for persisting them via `onProgress`,
+ * fired whenever any of the three change — this component itself has no notion of
+ * AppState/persistence, matching its existing pure/presentational design). The deck is
+ * rebuilt excluding whatever's already been decided, so resuming never re-shows a tile
+ * the user already swiped on.
  */
-export default function SwipeDeckScreen({ onDone }: { onDone: (kept: TileIdea[]) => void }) {
+export default function SwipeDeckScreen({
+  onDone,
+  onProgress,
+  initialKept = [],
+  initialRejected = [],
+  initialUsedSecondPass = false,
+}: {
+  onDone: (kept: TileIdea[]) => void;
+  onProgress?: (kept: TileIdea[], rejected: TileIdea[], usedSecondPass: boolean) => void;
+  initialKept?: TileIdea[];
+  initialRejected?: TileIdea[];
+  initialUsedSecondPass?: boolean;
+}) {
   const sound = useSound();
-  const [deck, setDeck] = useState<TileIdea[]>(() => buildDeck());
-  const [rejected, setRejected] = useState<TileIdea[]>([]);
-  const [kept, setKept] = useState<TileIdea[]>([]);
-  const [usedSecondPass, setUsedSecondPass] = useState(false);
+  const [deck, setDeck] = useState<TileIdea[]>(() =>
+    buildDeck(new Set([...initialKept, ...initialRejected].map((t) => t.id)))
+  );
+  const [rejected, setRejected] = useState<TileIdea[]>(initialRejected);
+  const [kept, setKept] = useState<TileIdea[]>(initialKept);
+  const [usedSecondPass, setUsedSecondPass] = useState(initialUsedSecondPass);
   const [writing, setWriting] = useState(false);
   const [customText, setCustomText] = useState('');
   const cardRef = useRef<SwipeCardHandle>(null);
+
+  useEffect(() => {
+    onProgress?.(kept, rejected, usedSecondPass);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kept, rejected, usedSecondPass]);
+
+  // A resumed session can land on an already-empty deck (everything was already
+  // decided before the break) — buildDeck() with no excludes is never empty, so this
+  // case doesn't exist outside resume; without this, the screen would just render
+  // blank instead of finishing.
+  useEffect(() => {
+    if (deck.length === 0) onDone(kept);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const current = deck[0];
   const upNext = deck[1];

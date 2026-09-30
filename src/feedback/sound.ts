@@ -23,7 +23,7 @@ export function setSoundEnabled(v: boolean) {
   enabled = v;
 }
 
-interface SoundApi {
+export interface SoundApi {
   play: (name: SoundName) => void;
 }
 

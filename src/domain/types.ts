@@ -1,16 +1,19 @@
 /**
- * On My Card — core data model (schema v4).
+ * On My Card — core data model (schema v5).
  *
- * One card, one year: a fixed 5×5 bingo card of comfort-zone challenges and new
- * experiences, built by swiping through a curated bank of ideas (see tileBank.ts) rather
- * than typed in. The centre cell (12) is a permanent FREE space. Completing a line
- * (row/column/diagonal) is a bingo — a checkpoint against the reward ladder; the card is
- * complete when every tile on it is crossed off.
+ * The user can build any number of cards (a "My Cards" dashboard lists them); each one
+ * is a fixed 5×5 grid of comfort-zone challenges and new experiences, built by swiping
+ * through a curated bank of ideas (see tileBank.ts) rather than typed in. The centre
+ * cell (12) is a permanent FREE space. Completing a line (row/column/diagonal) is a
+ * bingo — a checkpoint against that card's own reward ladder; a card is complete when
+ * every tile on it is crossed off. (Schema v4 and earlier had exactly one card, ever —
+ * see AppStateContext's hydrate migration for how an old single-card blob becomes the
+ * first entry in `cards`.)
  *
  * Plain JSON so it round-trips through the Repository (local now, Supabase later).
  */
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const GRID = 5;
 export const CELL_COUNT = GRID * GRID; // 25
@@ -73,11 +76,41 @@ export interface Reward {
 }
 
 export interface Card {
+  id: string;
   title: string;
+  /** A small personal touch shown big on the dashboard — how the user feels about this
+   *  card, not a category icon. Free choice (their own device emoji keyboard), not a
+   *  curated set. Optional; falls back to a generic 🃏 wherever it's displayed. */
+  emoji?: string;
   year: number;
   createdAt: number;
   tiles: Tile[]; // up to 24, from the swipe deck
   rewards: Reward[];
+  /** The one tile the user is currently focusing on, if any — dims the rest of the grid
+   *  and steers AI coaching (nudge/reflection) toward it. Never a crossed tile: crossing
+   *  the focused tile off clears this. */
+  focusedTileId?: string;
+}
+
+/** A tile the user has already swiped a decision on while building a card — kept or
+ *  rejected. Structurally identical to tileBank.ts's `TileIdea`, defined separately here
+ *  (rather than imported) so this file never depends on tileBank.ts, which itself
+ *  depends on this file for `TileCategory` — importing the other way would be circular. */
+export interface DraftCardTile {
+  id: string;
+  emoji: string;
+  label: string;
+  note: string;
+  category?: TileCategory;
+}
+
+/** An in-progress "building a card" session, saved so it can be paused and resumed —
+ *  picking 24 tiles in one sitting isn't always realistic. Cleared once the card is
+ *  actually created (`AppStateContext`'s `clearDraftCard`). */
+export interface DraftCard {
+  kept: DraftCardTile[];
+  rejected: DraftCardTile[];
+  usedSecondPass: boolean;
 }
 
 export type LogKind = 'tile' | 'bingo' | 'card' | 'reward';
@@ -93,8 +126,8 @@ export interface Settings {
   soundEnabled: boolean;
   hapticsEnabled: boolean;
   notificationsEnabled: boolean;
-  weeklyCheckinDay: number; // 0 (Sun) .. 6 (Sat)
-  weeklyCheckinHour: number; // 0..23
+  weeklyCheckinDays: number[]; // 0 (Sun) .. 6 (Sat), one or more, at least one always kept
+  weeklyCheckinMinutes: number[]; // minutes since midnight (0..1439), one or more — empty means "not yet configured"
   /** Flips true only once the welcome → swipe-deck → reveal flow is dismissed — kept
    *  separate from `card` existing so the reveal screen gets to play out before
    *  RootNavigator swaps to the main app. */
@@ -105,15 +138,21 @@ export const DEFAULT_SETTINGS: Settings = {
   soundEnabled: true,
   hapticsEnabled: true,
   notificationsEnabled: false,
-  weeklyCheckinDay: 1, // Monday
-  weeklyCheckinHour: 9,
+  weeklyCheckinDays: [1], // Monday
+  weeklyCheckinMinutes: [], // nothing chosen yet — SettingsScreen shows "+ Add a time"
   onboardingComplete: false,
 };
 
 export interface AppState {
   schemaVersion: number;
-  /** Null until the welcome → swipe-deck → reveal flow finishes building the first card. */
-  card: Card | null;
+  /** Every bingo card the user has built — empty until the welcome → swipe-deck →
+   *  reveal flow finishes building the first one. Newest first. */
+  cards: Card[];
+  /** An in-progress card build, paused mid-swipe — null when nothing's in progress.
+   *  Added after schema v5 shipped; a purely additive field, so (like `Settings` fields
+   *  added later) hydrate backfills a missing key to `null` rather than bumping the
+   *  schema version for it. */
+  draftCard: DraftCard | null;
   settings: Settings;
   log: LogEntry[]; // newest first
 }

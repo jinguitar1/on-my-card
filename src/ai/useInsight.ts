@@ -45,8 +45,18 @@ interface UseInsightResult {
   /** Pass `force: true` to bypass the cache and generate a fresh one (e.g. a
    *  "Regenerate" button) — otherwise this just checks whether a newer cached
    *  entry exists yet (a no-op within the same period for nudge/reflection, and
-   *  always a no-op for breakdown, whose cache key never naturally advances). */
-  refresh: (force?: boolean) => void;
+   *  always a no-op for breakdown, whose cache key never naturally advances).
+   *  `context` (breakdown only) is free text the user typed about their own
+   *  situation, folded into the prompt so the plan isn't generated from the tile
+   *  label alone. */
+  refresh: (force?: boolean, context?: string) => void;
+  /** A pure content edit (e.g. hand-editing a breakdown's steps) that needs no new
+   *  Claude call — writes straight to the existing `ai_insights` row instead of going
+   *  through the Edge Function, relying on that table's "update own insights" RLS
+   *  policy. Optimistically updates the local `insight` on success; resolves `false`
+   *  (and leaves local state untouched) if there's nothing cached yet to update or the
+   *  write fails. */
+  updateContent: (content: string) => Promise<boolean>;
 }
 
 export function useInsight(kind: InsightKind, options: UseInsightOptions = {}): UseInsightResult {
@@ -58,7 +68,7 @@ export function useInsight(kind: InsightKind, options: UseInsightOptions = {}): 
   const requestId = useRef(0);
 
   const fetchInsight = useCallback(
-    (force = false) => {
+    (force = false, context?: string) => {
       if (status !== 'signedIn') {
         setInsight(null);
         return;
@@ -68,7 +78,7 @@ export function useInsight(kind: InsightKind, options: UseInsightOptions = {}): 
       setLoading(true);
       setError(null);
       void supabase.functions
-        .invoke('ai-insights', { body: { kind, periodType, tileId, force } })
+        .invoke('ai-insights', { body: { kind, periodType, tileId, force, context } })
         .then(({ data, error: fnError }) => {
           if (id !== requestId.current) return; // a newer request superseded this one
           if (fnError) {
@@ -98,5 +108,22 @@ export function useInsight(kind: InsightKind, options: UseInsightOptions = {}): 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchInsight, auto]);
 
-  return { insight, loading, error, refresh: fetchInsight };
+  const updateContent = useCallback(
+    async (content: string): Promise<boolean> => {
+      if (status !== 'signedIn' || !insight) return false;
+      const { data, error: updErr } = await supabase
+        .from('ai_insights')
+        .update({ content })
+        .eq('kind', kind)
+        .eq('period', insight.period)
+        .select()
+        .single();
+      if (updErr || !data) return false;
+      setInsight(data as Insight);
+      return true;
+    },
+    [status, kind, insight]
+  );
+
+  return { insight, loading, error, refresh: fetchInsight, updateContent };
 }

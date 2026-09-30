@@ -11,13 +11,17 @@ import {
 import { AppState as RNAppState } from 'react-native';
 
 import { useAuth } from '../auth/AuthContext';
+import { FEATURES } from '../config/features';
 import { MAX_BINGOS, bingoCount, bonusFor, completedLines, isCardComplete, lineLabel, uid } from '../domain/logic';
 import { emptyState } from '../domain/seed';
 import {
   CENTER,
+  DEFAULT_SETTINGS,
   SCHEMA_VERSION,
   type AppState,
   type Card,
+  type DraftCard,
+  type DraftCardTile,
   type Reward,
   type Settings,
   type Tile,
@@ -46,18 +50,22 @@ interface AppApi {
   dismissCelebration: () => void;
   syncStatus: { lastSyncedAt: number | null; lastError: string | null };
 
-  createCard: (kept: TileSeed[]) => void;
-  renameCard: (title: string) => void;
+  createCard: (kept: TileSeed[], title: string, emoji?: string) => void;
+  renameCard: (cardId: string, title: string) => void;
+  setCardEmoji: (cardId: string, emoji: string) => void;
+  saveDraftCard: (kept: DraftCardTile[], rejected: DraftCardTile[], usedSecondPass: boolean) => void;
+  clearDraftCard: () => void;
 
-  pressTile: (cell: number) => TileOutcome;
-  setTileDone: (cell: number, done: boolean) => void;
-  setTile: (cell: number, seed: TileSeed) => void;
-  clearTile: (cell: number) => void;
+  pressTile: (cardId: string, cell: number) => TileOutcome;
+  setTileDone: (cardId: string, cell: number, done: boolean) => void;
+  setTile: (cardId: string, cell: number, seed: TileSeed) => void;
+  clearTile: (cardId: string, cell: number) => void;
+  setFocusedTile: (cardId: string, tileId: string | null) => void;
 
-  addReward: () => void;
-  editReward: (rewardId: string, patch: Partial<Reward>) => void;
-  removeReward: (rewardId: string) => void;
-  claimReward: (rewardId: string) => void;
+  addReward: (cardId: string) => void;
+  editReward: (cardId: string, rewardId: string, patch: Partial<Reward>) => void;
+  removeReward: (cardId: string, rewardId: string) => void;
+  claimReward: (cardId: string, rewardId: string) => void;
 
   updateSettings: (patch: Partial<Settings>) => Promise<void>;
   resetAll: () => Promise<void>;
@@ -87,11 +95,15 @@ function celebrationsFor(before: Card, after: Card): CelebrationPayload[] {
     for (const line of newLines) out.push({ kind: 'bingo', lineLabel: lineLabel(line) });
   }
 
-  const beforeBingos = bingoCount(before);
-  const afterBingos = bingoCount(after);
-  for (const rw of after.rewards) {
-    if (rw.bingos > beforeBingos && rw.bingos <= afterBingos) {
-      out.push({ kind: 'reward', bingos: rw.bingos, text: rw.text });
+  // Rewards are tucked away (unfleshed-out feature) — skip the unlock celebration so it
+  // never pops a "REWARD UNLOCKED" takeover pointing at a Rewards tab that isn't there.
+  if (FEATURES.rewards) {
+    const beforeBingos = bingoCount(before);
+    const afterBingos = bingoCount(after);
+    for (const rw of after.rewards) {
+      if (rw.bingos > beforeBingos && rw.bingos <= afterBingos) {
+        out.push({ kind: 'reward', bingos: rw.bingos, text: rw.text });
+      }
     }
   }
   return out;
@@ -146,8 +158,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const loaded = await repository.load();
-      const base = loaded && loaded.schemaVersion === SCHEMA_VERSION ? loaded : emptyState();
+      const loadedRaw = await repository.load();
+      // v4 → v5: the old shape had one `card: Card | null` instead of `cards: Card[]`.
+      // This is a real, lossless transform (unlike a version mismatch with no known
+      // shape), so — deliberately, see LocalRepository's key comment — the AsyncStorage
+      // key was NOT bumped for this change, specifically so this old data is still found
+      // here instead of being silently orphaned under an unreachable key.
+      let loaded: AppState | null = null;
+      if (loadedRaw) {
+        const raw = loadedRaw as unknown as
+          | AppState
+          | { schemaVersion: 4; card: Card | null; settings: AppState['settings']; log: AppState['log'] };
+        if (raw.schemaVersion === SCHEMA_VERSION) {
+          loaded = raw as AppState;
+        } else if (raw.schemaVersion === 4 && 'card' in raw) {
+          loaded = {
+            schemaVersion: SCHEMA_VERSION,
+            cards: raw.card ? [{ ...raw.card, id: uid('card') }] : [],
+            draftCard: null,
+            settings: raw.settings,
+            log: raw.log,
+          };
+        }
+      }
+      // Merge onto DEFAULT_SETTINGS (not a bare pass-through) so a settings field added
+      // after some data was already persisted — same schemaVersion, just missing a key
+      // that didn't exist yet — backfills to its default instead of reading as
+      // `undefined` at every call site. `draftCard` gets the same treatment: it was
+      // added after v5 shipped, so old v5 data simply lacks the key.
+      const base = loaded
+        ? { ...loaded, draftCard: loaded.draftCard ?? null, settings: { ...DEFAULT_SETTINGS, ...loaded.settings } }
+        : emptyState();
       if (!alive) return;
       commitState(base);
       setHapticsEnabled(base.settings.hapticsEnabled);
@@ -201,7 +242,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // --- card creation ---
   const createCard = useCallback(
-    (kept: TileSeed[]) => {
+    (kept: TileSeed[], title: string, emoji?: string) => {
       const s = stateRef.current;
       const tiles: Tile[] = kept.slice(0, 24).map((seed, i) => ({
         id: uid('tile'),
@@ -213,19 +254,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
         bankId: seed.bankId,
       }));
       const card: Card = {
-        title: `My ${new Date().getFullYear()} Card`,
+        id: uid('card'),
+        title: title.trim() || `My ${new Date().getFullYear()} Card`,
+        emoji: emoji?.trim() || undefined,
         year: new Date().getFullYear(),
         createdAt: Date.now(),
         tiles,
         rewards: defaultRewards(),
       };
-      commitState({ ...s, card, log: log(s, 'card', 'Card built') });
+      // Newest first — the dashboard shows `cards` in this order with no separate sort.
+      commitState({ ...s, cards: [card, ...s.cards], log: log(s, 'card', 'Card built') });
     },
     [commitState]
   );
 
-  const renameCard = useCallback((title: string) => {
-    setState((st) => (st.card ? { ...st, card: { ...st.card, title: title.trim() || st.card.title } } : st));
+  const renameCard = useCallback((cardId: string, title: string) => {
+    setState((st) => ({
+      ...st,
+      cards: st.cards.map((c) => (c.id === cardId ? { ...c, title: title.trim() || c.title } : c)),
+    }));
+  }, []);
+
+  const setCardEmoji = useCallback((cardId: string, emoji: string) => {
+    setState((st) => ({
+      ...st,
+      cards: st.cards.map((c) => (c.id === cardId ? { ...c, emoji: emoji.trim() || undefined } : c)),
+    }));
+  }, []);
+
+  // --- draft card (an in-progress swipe-deck session, paused and resumed) ---
+  const saveDraftCard = useCallback((kept: DraftCardTile[], rejected: DraftCardTile[], usedSecondPass: boolean) => {
+    setState((st) => ({ ...st, draftCard: { kept, rejected, usedSecondPass } }));
+  }, []);
+
+  const clearDraftCard = useCallback(() => {
+    setState((st) => ({ ...st, draftCard: null }));
   }, []);
 
   // --- tile interaction ---
@@ -240,52 +303,65 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const pressTile = useCallback(
-    (cell: number): TileOutcome => {
+    (cardId: string, cell: number): TileOutcome => {
       const s = stateRef.current;
-      const card = s.card;
+      const card = s.cards.find((c) => c.id === cardId);
       const tile = card?.tiles.find((t) => t.cell === cell);
       if (!card || !tile) return EMPTY_TILE_OUTCOME;
 
       const willCross = !tile.doneAt;
       const { before, after } = commit((st) => {
-        if (!st.card) return st;
+        const stCard = st.cards.find((c) => c.id === cardId);
+        if (!stCard) return st;
         const nextCard: Card = {
-          ...st.card,
-          tiles: st.card.tiles.map((t) => (t.id === tile.id ? { ...t, doneAt: willCross ? Date.now() : undefined } : t)),
+          ...stCard,
+          tiles: stCard.tiles.map((t) => (t.id === tile.id ? { ...t, doneAt: willCross ? Date.now() : undefined } : t)),
+          // Crossing off the focused tile clears the focus — nothing left to steer toward.
+          focusedTileId: willCross && stCard.focusedTileId === tile.id ? undefined : stCard.focusedTileId,
         };
-        const withLog = willCross ? { ...st, card: nextCard, log: log(st, 'tile', `Crossed off "${tile.label}"`) } : { ...st, card: nextCard };
-        return withLog;
+        const nextCards = st.cards.map((c) => (c.id === cardId ? nextCard : c));
+        return willCross
+          ? { ...st, cards: nextCards, log: log(st, 'tile', `Crossed off "${tile.label}"`) }
+          : { ...st, cards: nextCards };
       });
-      if (!before.card || !after.card) return EMPTY_TILE_OUTCOME;
-      enqueue(celebrationsFor(before.card, after.card));
-      return outcomeFor(before.card, after.card, willCross, !willCross, willCross && bonusFor(tile.id));
+      const beforeCard = before.cards.find((c) => c.id === cardId);
+      const afterCard = after.cards.find((c) => c.id === cardId);
+      if (!beforeCard || !afterCard) return EMPTY_TILE_OUTCOME;
+      enqueue(celebrationsFor(beforeCard, afterCard));
+      return outcomeFor(beforeCard, afterCard, willCross, !willCross, willCross && bonusFor(tile.id));
     },
     [commit, enqueue]
   );
 
   const setTileDone = useCallback(
-    (cell: number, done: boolean) => {
-      const card = stateRef.current.card;
+    (cardId: string, cell: number, done: boolean) => {
+      const card = stateRef.current.cards.find((c) => c.id === cardId);
       const tile = card?.tiles.find((t) => t.cell === cell);
       if (!card || !tile) return;
       const { before, after } = commit((st) => {
-        if (!st.card) return st;
+        const stCard = st.cards.find((c) => c.id === cardId);
+        if (!stCard) return st;
         const nextCard: Card = {
-          ...st.card,
-          tiles: st.card.tiles.map((t) => (t.id === tile.id ? { ...t, doneAt: done ? Date.now() : undefined } : t)),
+          ...stCard,
+          tiles: stCard.tiles.map((t) => (t.id === tile.id ? { ...t, doneAt: done ? Date.now() : undefined } : t)),
+          focusedTileId: done && stCard.focusedTileId === tile.id ? undefined : stCard.focusedTileId,
         };
-        return done ? { ...st, card: nextCard, log: log(st, 'tile', `Crossed off "${tile.label}"`) } : { ...st, card: nextCard };
+        const nextCards = st.cards.map((c) => (c.id === cardId ? nextCard : c));
+        return done ? { ...st, cards: nextCards, log: log(st, 'tile', `Crossed off "${tile.label}"`) } : { ...st, cards: nextCards };
       });
-      if (before.card && after.card) enqueue(celebrationsFor(before.card, after.card));
+      const beforeCard = before.cards.find((c) => c.id === cardId);
+      const afterCard = after.cards.find((c) => c.id === cardId);
+      if (beforeCard && afterCard) enqueue(celebrationsFor(beforeCard, afterCard));
     },
     [commit, enqueue]
   );
 
-  const setTile = useCallback((cell: number, seed: TileSeed) => {
+  const setTile = useCallback((cardId: string, cell: number, seed: TileSeed) => {
     if (cell === CENTER) return;
     setState((st) => {
-      if (!st.card) return st;
-      const existing = st.card.tiles.find((t) => t.cell === cell);
+      const stCard = st.cards.find((c) => c.id === cardId);
+      if (!stCard) return st;
+      const existing = stCard.tiles.find((t) => t.cell === cell);
       const tile: Tile = {
         id: existing?.id ?? uid('tile'),
         cell,
@@ -295,38 +371,64 @@ export function AppProvider({ children }: { children: ReactNode }) {
         category: seed.category,
         bankId: seed.bankId,
       };
-      const tiles = existing ? st.card.tiles.map((t) => (t.id === existing.id ? tile : t)) : [...st.card.tiles, tile].sort((a, b) => a.cell - b.cell);
-      return { ...st, card: { ...st.card, tiles } };
+      const tiles = existing ? stCard.tiles.map((t) => (t.id === existing.id ? tile : t)) : [...stCard.tiles, tile].sort((a, b) => a.cell - b.cell);
+      return { ...st, cards: st.cards.map((c) => (c.id === cardId ? { ...stCard, tiles } : c)) };
     });
   }, []);
 
-  const clearTile = useCallback((cell: number) => {
+  const clearTile = useCallback((cardId: string, cell: number) => {
     setState((st) => {
-      if (!st.card) return st;
-      return { ...st, card: { ...st.card, tiles: st.card.tiles.filter((t) => t.cell !== cell) } };
+      const stCard = st.cards.find((c) => c.id === cardId);
+      if (!stCard) return st;
+      const tiles = stCard.tiles.filter((t) => t.cell !== cell);
+      const removed = stCard.tiles.find((t) => t.cell === cell);
+      const focusedTileId = removed && stCard.focusedTileId === removed.id ? undefined : stCard.focusedTileId;
+      return { ...st, cards: st.cards.map((c) => (c.id === cardId ? { ...stCard, tiles, focusedTileId } : c)) };
     });
+  }, []);
+
+  /** Pass `null` to clear focus. Only ever one tile focused at a time per card — setting
+   *  a new one replaces whatever was focused before, matching "pick the one thing to
+   *  work toward" rather than a growing list. */
+  const setFocusedTile = useCallback((cardId: string, tileId: string | null) => {
+    setState((st) => ({
+      ...st,
+      cards: st.cards.map((c) => (c.id === cardId ? { ...c, focusedTileId: tileId ?? undefined } : c)),
+    }));
   }, []);
 
   // --- rewards ---
-  const addReward = useCallback(() => {
+  const addReward = useCallback((cardId: string) => {
     setState((st) => {
-      if (!st.card) return st;
-      const max = st.card.rewards.reduce((m, r) => Math.max(m, r.bingos), 0);
-      return { ...st, card: { ...st.card, rewards: [...st.card.rewards, { id: uid('rw'), bingos: Math.min(MAX_BINGOS, max + 1), text: '' }] } };
+      const stCard = st.cards.find((c) => c.id === cardId);
+      if (!stCard) return st;
+      const max = stCard.rewards.reduce((m, r) => Math.max(m, r.bingos), 0);
+      const nextCard = { ...stCard, rewards: [...stCard.rewards, { id: uid('rw'), bingos: Math.min(MAX_BINGOS, max + 1), text: '' }] };
+      return { ...st, cards: st.cards.map((c) => (c.id === cardId ? nextCard : c)) };
     });
   }, []);
-  const editReward = useCallback((rewardId: string, patch: Partial<Reward>) => {
-    setState((st) => (st.card ? { ...st, card: { ...st.card, rewards: st.card.rewards.map((r) => (r.id === rewardId ? { ...r, ...patch } : r)) } } : st));
+  const editReward = useCallback((cardId: string, rewardId: string, patch: Partial<Reward>) => {
+    setState((st) => ({
+      ...st,
+      cards: st.cards.map((c) =>
+        c.id === cardId ? { ...c, rewards: c.rewards.map((r) => (r.id === rewardId ? { ...r, ...patch } : r)) } : c
+      ),
+    }));
   }, []);
-  const removeReward = useCallback((rewardId: string) => {
-    setState((st) => (st.card ? { ...st, card: { ...st.card, rewards: st.card.rewards.filter((r) => r.id !== rewardId) } } : st));
+  const removeReward = useCallback((cardId: string, rewardId: string) => {
+    setState((st) => ({
+      ...st,
+      cards: st.cards.map((c) => (c.id === cardId ? { ...c, rewards: c.rewards.filter((r) => r.id !== rewardId) } : c)),
+    }));
   }, []);
-  const claimReward = useCallback((rewardId: string) => {
+  const claimReward = useCallback((cardId: string, rewardId: string) => {
     setState((st) => {
-      if (!st.card) return st;
-      const rw = st.card.rewards.find((r) => r.id === rewardId);
-      const card: Card = { ...st.card, rewards: st.card.rewards.map((r) => (r.id === rewardId ? { ...r, claimedAt: Date.now() } : r)) };
-      return rw ? { ...st, card, log: log(st, 'reward', `Claimed: ${rw.text || `${rw.bingos}-bingo reward`}`) } : { ...st, card };
+      const stCard = st.cards.find((c) => c.id === cardId);
+      if (!stCard) return st;
+      const rw = stCard.rewards.find((r) => r.id === rewardId);
+      const nextCard = { ...stCard, rewards: stCard.rewards.map((r) => (r.id === rewardId ? { ...r, claimedAt: Date.now() } : r)) };
+      const nextCards = st.cards.map((c) => (c.id === cardId ? nextCard : c));
+      return rw ? { ...st, cards: nextCards, log: log(st, 'reward', `Claimed: ${rw.text || `${rw.bingos}-bingo reward`}`) } : { ...st, cards: nextCards };
     });
   }, []);
 
@@ -356,10 +458,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       syncStatus,
       createCard,
       renameCard,
+      setCardEmoji,
+      saveDraftCard,
+      clearDraftCard,
       pressTile,
       setTileDone,
       setTile,
       clearTile,
+      setFocusedTile,
       addReward,
       editReward,
       removeReward,
@@ -375,10 +481,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       syncStatus,
       createCard,
       renameCard,
+      setCardEmoji,
+      saveDraftCard,
+      clearDraftCard,
       pressTile,
       setTileDone,
       setTile,
       clearTile,
+      setFocusedTile,
       addReward,
       editReward,
       removeReward,

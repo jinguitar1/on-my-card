@@ -3,9 +3,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AppState } from '../domain/types';
 import type { Repository } from './repository';
 
-// Bumped whenever the persisted shape changes incompatibly, so old-shaped blobs never
-// get mistaken for the current one (see AppStateContext's schemaVersion check, which
-// discards anything that doesn't match — there is no real per-field migration here).
+// Bumped whenever the persisted shape changes incompatibly *and there's no real
+// migration path* — old-shaped blobs then never get mistaken for the current one (see
+// AppStateContext's schemaVersion check, which discards anything unrecognized). The v4
+// (single `card`) → v5 (`cards[]`) change deliberately did NOT bump this key: it has a
+// real, lossless transform written into AppStateContext's hydrate effect, and bumping
+// the key would have orphaned every existing user's data under a key nothing reads
+// anymore instead of letting it be migrated.
 const KEY = 'onmycard:appstate:v4';
 // Written alongside every save so SyncRepository can compare "last modified locally"
 // against a remote row's `updated_at` without touching the AppState shape itself.

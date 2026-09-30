@@ -4,9 +4,12 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '../auth/AuthContext';
+import { FEATURES } from '../config/features';
 import { CelebrationOverlay } from '../feedback/Celebration';
 import { useApp } from '../state/AppStateContext';
-import CardScreen from '../screens/CardScreen';
+import CardDashboardScreen from '../screens/CardDashboardScreen';
+import CardDetailScreen from '../screens/CardDetailScreen';
+import CreateCardScreen from '../screens/CreateCardScreen';
 import OnboardingNavigator from '../screens/OnboardingNavigator';
 import RewardsScreen from '../screens/RewardsScreen';
 import SettingsScreen from '../screens/SettingsScreen';
@@ -16,6 +19,22 @@ import { colors } from '../ui/theme';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
+const CardStackNav = createNativeStackNavigator();
+
+// The Card tab is its own small stack — a dashboard listing every card, and a detail
+// screen (opened by cardId) carrying the focus banner / stat pills / grid that used to
+// live directly on the tab. Nesting a stack inside a tab screen is standard
+// @react-navigation practice; a screen nested here can still reach sibling top-level
+// screens like TileSheet/SignIn/CreateCard by name (React Navigation's `navigate` walks
+// up through parent navigators to find them).
+function CardStack() {
+  return (
+    <CardStackNav.Navigator screenOptions={{ headerShown: false }}>
+      <CardStackNav.Screen name="CardDashboard" component={CardDashboardScreen} />
+      <CardStackNav.Screen name="CardDetail" component={CardDetailScreen} />
+    </CardStackNav.Navigator>
+  );
+}
 
 // `dot`: a small always-on cue (currently used to flag "not signed in" on the
 // Settings tab) so sign-in stays findable from anywhere in the app, not just the
@@ -40,8 +59,10 @@ function Tabs() {
         tabBarLabelStyle: { fontWeight: '700', fontSize: 11 },
       }}
     >
-      <Tab.Screen name="Card" component={CardScreen} options={{ tabBarIcon: tabIcon('🃏') }} />
-      <Tab.Screen name="Rewards" component={RewardsScreen} options={{ tabBarIcon: tabIcon('🎟️') }} />
+      <Tab.Screen name="Card" component={CardStack} options={{ tabBarIcon: tabIcon('🃏') }} />
+      {FEATURES.rewards && (
+        <Tab.Screen name="Rewards" component={RewardsScreen} options={{ tabBarIcon: tabIcon('🎟️') }} />
+      )}
       <Tab.Screen name="Settings" component={SettingsScreen} options={{ tabBarIcon: tabIcon('⚙️', signedOut) }} />
     </Tab.Navigator>
   );
@@ -70,7 +91,7 @@ export default function RootNavigator() {
     );
   }
 
-  if (!state.settings.onboardingComplete || !state.card) {
+  if (!state.settings.onboardingComplete || state.cards.length === 0) {
     return <OnboardingNavigator />;
   }
 
@@ -80,6 +101,7 @@ export default function RootNavigator() {
         <Stack.Screen name="Tabs" component={Tabs} />
         <Stack.Screen name="TileSheet" component={TileSheetScreen} options={{ presentation: 'modal' }} />
         <Stack.Screen name="SignIn" component={SignInScreen} options={{ presentation: 'modal' }} />
+        <Stack.Screen name="CreateCard" component={CreateCardScreen} options={{ presentation: 'modal' }} />
       </Stack.Navigator>
       <CelebrationOverlay payload={celebration} onDismiss={dismissCelebration} />
     </NavigationContainer>

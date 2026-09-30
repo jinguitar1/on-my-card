@@ -25,6 +25,7 @@ import {
   CORS_HEADERS,
   NUDGE_SYSTEM,
   REFLECTION_SYSTEM,
+  WEB_SEARCH_TOOL,
   buildBreakdownPrompt,
   buildNudgePrompt,
   buildReflectionPrompt,
@@ -62,7 +63,7 @@ Deno.serve(async (req) => {
   if (userErr || !userData.user) return json({ error: 'unauthorized' }, 401);
   const userId = userData.user.id;
 
-  let body: { kind?: string; periodType?: string; tileId?: string; force?: boolean };
+  let body: { kind?: string; periodType?: string; tileId?: string; force?: boolean; context?: string };
   try {
     body = await req.json();
   } catch {
@@ -95,11 +96,12 @@ Deno.serve(async (req) => {
 
   const { data: row } = await supabase.from('app_state').select('state').maybeSingle();
   const state = row?.state as AppStateShape | undefined;
-  if (!state?.card || state.card.tiles.length === 0) return json({ error: 'no card yet' }, 404);
+  if (!state?.cards?.length || state.cards[0].tiles.length === 0) return json({ error: 'no card yet' }, 404);
 
   let system: string;
   let prompt: string;
   let maxTokens: number;
+  let tools: unknown[] | undefined;
 
   if (kind === 'nudge') {
     system = NUDGE_SYSTEM;
@@ -113,13 +115,14 @@ Deno.serve(async (req) => {
     const tile = findTile(state, body.tileId!);
     if (!tile) return json({ error: 'tile not found' }, 404);
     system = BREAKDOWN_SYSTEM;
-    prompt = buildBreakdownPrompt(tile);
-    maxTokens = 700;
+    prompt = buildBreakdownPrompt(tile, body.context);
+    maxTokens = 1500; // higher than the other kinds: room for tool-augmented research plus the final JSON
+    tools = [WEB_SEARCH_TOOL];
   }
 
   let content: string;
   try {
-    content = await callClaude(ANTHROPIC_API_KEY, system, prompt, maxTokens);
+    content = await callClaude(ANTHROPIC_API_KEY, system, prompt, maxTokens, tools);
   } catch (err) {
     console.error(err);
     return json({ error: 'coach unavailable' }, 502);

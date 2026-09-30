@@ -11,6 +11,7 @@ import {
   type LineKey,
   type Reward,
   type Tile,
+  type TileCategory,
 } from './types';
 
 // --- ids & dates --------------------------------------------------------
@@ -138,4 +139,32 @@ export function nextReward(card: Card): Reward | undefined {
 
 export function claimableRewards(card: Card): Reward[] {
   return sortedRewards(card).filter((r) => rewardUnlocked(card, r) && !r.claimedAt);
+}
+
+// --- radar stats ------------------------------------------------
+
+export const RADAR_CATEGORIES: TileCategory[] = [
+  'comfort', 'adventure', 'creative', 'health', 'career', 'kindness', 'fun', 'mindful',
+];
+
+export interface CategoryStat {
+  category: TileCategory;
+  /** Crossed-off tiles in this category. */
+  current: number;
+  /** All tiles in this category currently on the card (crossed + open) — "where your
+   *  stats land if you finish everything you've already committed to." */
+  projected: number;
+}
+
+/** One current/projected pair per category, in a fixed axis order — the "quick glance"
+ *  radar on the Card tab. */
+export function radarStats(card: Card): CategoryStat[] {
+  return RADAR_CATEGORIES.map((category) => {
+    const inCategory = card.tiles.filter((t) => t.category === category);
+    return {
+      category,
+      current: inCategory.filter((t) => isTileCrossed(t)).length,
+      projected: inCategory.length,
+    };
+  });
 }

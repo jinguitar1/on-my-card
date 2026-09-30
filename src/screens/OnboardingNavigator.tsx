@@ -1,20 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { type TileIdea } from '../domain/tileBank';
-import { CELL_COUNT, CENTER, GRID } from '../domain/types';
-import { Confetti } from '../feedback/Celebration';
-import { triumphHit } from '../feedback/haptics';
 import { useApp } from '../state/AppStateContext';
+import { CardReveal } from './CardReveal';
 import SwipeDeckScreen from './SwipeDeckScreen';
-import { CardTile, PrimaryButton, RoundButton, cardLayout } from '../ui/components';
+import { PrimaryButton, RoundButton } from '../ui/components';
 import { categoryColor, colors, space, type } from '../ui/theme';
 
 type Phase = 'welcome' | 'intro' | 'deck' | 'reveal';
 
 export default function OnboardingNavigator() {
-  const { createCard } = useApp();
+  const { createCard, updateSettings } = useApp();
   const [phase, setPhase] = useState<Phase>('welcome');
   const [kept, setKept] = useState<TileIdea[]>([]);
 
@@ -28,7 +26,6 @@ export default function OnboardingNavigator() {
         <SwipeDeckScreen
           onDone={(result) => {
             setKept(result);
-            createCard(result.map((t) => ({ label: t.label, emoji: t.emoji, note: t.note, category: t.category, bankId: t.id })));
             setPhase('reveal');
           }}
         />
@@ -36,12 +33,21 @@ export default function OnboardingNavigator() {
     );
   }
 
-  return <RevealScreen kept={kept} />;
-}
-
-function RevealScreen({ kept }: { kept: TileIdea[] }) {
-  const { updateSettings } = useApp();
-  return <RevealBody kept={kept} onEnter={() => void updateSettings({ onboardingComplete: true })} />;
+  return (
+    <CardReveal
+      kept={kept}
+      defaultTitle={`My ${new Date().getFullYear()} Card`}
+      ctaLabel="Enter my card"
+      onSave={(title, emoji) => {
+        createCard(
+          kept.map((t) => ({ label: t.label, emoji: t.emoji, note: t.note, category: t.category, bankId: t.id })),
+          title,
+          emoji
+        );
+        void updateSettings({ onboardingComplete: true });
+      }}
+    />
+  );
 }
 
 // --- welcome: warm, minimal, geometric --------------------------------
@@ -109,50 +115,6 @@ function ShapeBurst() {
   );
 }
 
-// --- reveal: the finished card stamps in -------------------------
-
-function RevealBody({ kept, onEnter }: { kept: TileIdea[]; onEnter: () => void }) {
-  const { width } = useWindowDimensions();
-  const gridW = Math.min(width - space.lg * 2, 420);
-  const layout = useMemo(() => cardLayout(gridW), [gridW]);
-
-  useEffect(() => {
-    triumphHit();
-  }, []);
-
-  return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.revealWrap}>
-        <Text style={styles.revealHeadline}>Your card is ready.</Text>
-        <View style={[styles.gridWrap, { width: gridW, height: gridW }]}>
-          {Array.from({ length: CELL_COUNT }).map((_, cell) => {
-            const r = Math.floor(cell / GRID);
-            const c = cell % GRID;
-            const stylePos = { position: 'absolute' as const, left: layout.pos(c), top: layout.pos(r) };
-            if (cell === CENTER) {
-              return (
-                <View key={cell} style={stylePos}>
-                  <CardTile isCenter size={layout.cell} />
-                </View>
-              );
-            }
-            const idea = kept[cell < CENTER ? cell : cell - 1];
-            return (
-              <View key={cell} style={stylePos}>
-                <CardTile size={layout.cell} label={idea?.label ?? '＋'} emoji={idea?.emoji} />
-              </View>
-            );
-          })}
-        </View>
-        <Confetti trigger={1} intensity="full" accent={colors.stampGold} />
-      </View>
-      <View style={styles.footer}>
-        <PrimaryButton label="Enter my card" onPress={onEnter} style={{ flex: 1 }} />
-      </View>
-    </SafeAreaView>
-  );
-}
-
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.paper },
   welcomeWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.xl },
@@ -167,7 +129,4 @@ const styles = StyleSheet.create({
   welcomeHeadline: { ...type.display, fontSize: 34, textAlign: 'center', lineHeight: 40 },
   welcomeSub: { ...type.body, color: colors.inkSoft, textAlign: 'center', marginTop: space.md, fontSize: 16 },
   footer: { padding: space.lg, flexDirection: 'row' },
-  revealWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space.lg },
-  revealHeadline: { ...type.display, textAlign: 'center', marginBottom: space.xl },
-  gridWrap: { position: 'relative' },
 });

@@ -18,8 +18,11 @@ const web = Platform.OS === 'web';
 
 export interface PushPrefs {
   enabled: boolean;
-  coachHour: number;
+  coachMinutes: number[];
+  coachDays: number[];
 }
+
+export const ALL_COACH_DAYS = [0, 1, 2, 3, 4, 5, 6];
 
 export async function getPushPrefs(): Promise<PushPrefs | null> {
   try {
@@ -27,17 +30,21 @@ export async function getPushPrefs(): Promise<PushPrefs | null> {
     if (!userData.user) return null;
     const { data } = await supabase
       .from('push_prefs')
-      .select('enabled, coach_hour')
+      .select('enabled, coach_minutes, coach_days')
       .eq('user_id', userData.user.id)
       .maybeSingle();
     if (!data) return null;
-    return { enabled: data.enabled, coachHour: data.coach_hour };
+    return { enabled: data.enabled, coachMinutes: data.coach_minutes, coachDays: data.coach_days };
   } catch {
     return null;
   }
 }
 
-export async function registerForPush(coachHour: number): Promise<boolean> {
+/** Enables push and registers this device's token. Leaves `coach_minutes`/`coach_days`
+ *  out of the upsert on purpose: on first activation the DB default (empty minutes, every
+ *  day) applies, and on re-activation whatever the user already configured is preserved
+ *  rather than reset. */
+export async function registerForPush(): Promise<boolean> {
   if (web) return false;
   try {
     if (!(await getPermission())) return false;
@@ -55,7 +62,6 @@ export async function registerForPush(coachHour: number): Promise<boolean> {
       user_id: userData.user.id,
       expo_push_token: tokenData,
       timezone,
-      coach_hour: coachHour,
       enabled: true,
     });
     return !error;
@@ -64,13 +70,27 @@ export async function registerForPush(coachHour: number): Promise<boolean> {
   }
 }
 
-export async function setCoachHour(coachHour: number): Promise<boolean> {
+export async function setCoachMinutes(coachMinutes: number[]): Promise<boolean> {
   try {
     const { data: userData } = await supabase.auth.getUser();
     if (!userData.user) return false;
     const { error } = await supabase
       .from('push_prefs')
-      .update({ coach_hour: coachHour })
+      .update({ coach_minutes: coachMinutes })
+      .eq('user_id', userData.user.id);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function setCoachDays(coachDays: number[]): Promise<boolean> {
+  try {
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) return false;
+    const { error } = await supabase
+      .from('push_prefs')
+      .update({ coach_days: coachDays })
       .eq('user_id', userData.user.id);
     return !error;
   } catch {

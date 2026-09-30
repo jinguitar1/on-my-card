@@ -10,8 +10,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 
-import { lineOrientation } from '../domain/logic';
-import { GRID, LINE_CELLS, type LineKey } from '../domain/types';
+import { GRID } from '../domain/types';
 import { colors, radius, shadow, space, type } from './theme';
 
 // --- buttons ----------------------------------------------------------
@@ -209,75 +208,8 @@ export const CARD_GAP = 6;
 
 export function cardLayout(gridWidth: number) {
   const cell = (gridWidth - CARD_GAP * (GRID - 1)) / GRID;
-  const railW = cell * 0.62;
   const pos = (i: number) => i * (cell + CARD_GAP);
-  return { cell, railW, pos, gridWidth };
-}
-
-/** A solid accent bar behind a *completed* line — the only lines that get a rail. */
-export function BingoRail({
-  line,
-  accent,
-  layout,
-}: {
-  line: LineKey;
-  accent: string;
-  layout: ReturnType<typeof cardLayout>;
-}) {
-  const { cell, railW, pos, gridWidth } = layout;
-  const orient = lineOrientation(line);
-  const cells = LINE_CELLS[line];
-
-  if (orient === 'row') {
-    const r = Math.floor(cells[0] / GRID);
-    return (
-      <View
-        pointerEvents="none"
-        style={{
-          position: 'absolute',
-          left: -CARD_GAP,
-          width: gridWidth + CARD_GAP * 2,
-          top: pos(r) + cell / 2 - railW / 2,
-          height: railW,
-          borderRadius: railW / 2,
-          backgroundColor: accent,
-        }}
-      />
-    );
-  }
-  if (orient === 'col') {
-    const c = cells[0] % GRID;
-    return (
-      <View
-        pointerEvents="none"
-        style={{
-          position: 'absolute',
-          top: -CARD_GAP,
-          height: gridWidth + CARD_GAP * 2,
-          left: pos(c) + cell / 2 - railW / 2,
-          width: railW,
-          borderRadius: railW / 2,
-          backgroundColor: accent,
-        }}
-      />
-    );
-  }
-  const len = Math.sqrt(2) * gridWidth + railW;
-  return (
-    <View
-      pointerEvents="none"
-      style={{
-        position: 'absolute',
-        left: gridWidth / 2 - len / 2,
-        top: gridWidth / 2 - railW / 2,
-        width: len,
-        height: railW,
-        borderRadius: railW / 2,
-        backgroundColor: accent,
-        transform: [{ rotate: orient === 'diagDown' ? '45deg' : '-45deg' }],
-      }}
-    />
-  );
+  return { cell, pos, gridWidth };
 }
 
 // --- card tile ----------------------------------------------------
@@ -290,11 +222,28 @@ export interface CardTileProps {
   crossed?: boolean;
   oneAwayColor?: string;
   stampKey?: number;
+  /** This is the card's one focused tile — draws a small gold ★ badge in the top-left
+   *  corner (never the crossed-off stamp's corner, top-right, so the two can't clash).
+   *  Kept visible even when the grid isn't dimmed (see CardDetailScreen), since it's the
+   *  one persistent way to spot the focused tile once the tunnel-vision dimming itself
+   *  has been dismissed. */
+  isFocused?: boolean;
   onPress?: () => void;
   onLongPress?: () => void;
 }
 
-export function CardTile({ size, isCenter, label, emoji, crossed, oneAwayColor, stampKey = 0, onPress, onLongPress }: CardTileProps) {
+export function CardTile({
+  size,
+  isCenter,
+  label,
+  emoji,
+  crossed,
+  oneAwayColor,
+  stampKey = 0,
+  isFocused,
+  onPress,
+  onLongPress,
+}: CardTileProps) {
   const scale = useRef(new Animated.Value(1)).current;
   const glow = useRef(new Animated.Value(0)).current;
 
@@ -333,18 +282,29 @@ export function CardTile({ size, isCenter, label, emoji, crossed, oneAwayColor, 
 
   const borderColor = glow.interpolate({ inputRange: [0, 1], outputRange: [colors.stampGold, oneAwayColor ?? colors.stampGold] });
   const borderWidth = glow.interpolate({ inputRange: [0, 1], outputRange: [1.5, 3] });
+  const ribbonSize = Math.max(11, Math.round(size * 0.22));
 
   return (
     <Animated.View style={{ width: size, height: size, transform: [{ scale }] }}>
       <Pressable onPress={onPress} onLongPress={onLongPress} delayLongPress={300} style={{ flex: 1 }}>
         <Animated.View style={[styles.tile, { borderColor, borderWidth }, crossed && styles.tileCrossed]}>
-          {!crossed && !!emoji && <Text style={styles.tileEmoji}>{emoji}</Text>}
+          {!!emoji && <Text style={styles.tileEmoji}>{emoji}</Text>}
           <Text numberOfLines={3} style={[styles.tileLabel, crossed && styles.tileLabelCrossed]}>
             {label}
           </Text>
           {crossed && (
-            <View style={styles.stampWrap}>
-              <Stamp playKey={stampKey || 1} mark="✕" size={Math.round(size * 0.5)} />
+            <View style={[styles.doneBadge, { width: ribbonSize, height: ribbonSize, borderRadius: ribbonSize / 2 }]}>
+              <Stamp playKey={stampKey || 1} mark="✓" size={Math.max(10, Math.round(ribbonSize * 0.62))} color="#fff" />
+            </View>
+          )}
+          {/* The gold star-in-circle badge used to also mark "part of a completed bingo
+             line" (top-left) — retired, since every tile in a completed line is by
+             definition crossed off, which directly conflicted with "crossed tiles
+             shouldn't show the gold star." This corner is now exclusively the focus
+             marker. */}
+          {!crossed && isFocused && (
+            <View style={[styles.focusBadge, { width: ribbonSize, height: ribbonSize, borderRadius: ribbonSize / 2 }]}>
+              <Text style={{ fontSize: ribbonSize * 0.6, color: colors.crossInk, fontWeight: '900' }}>★</Text>
             </View>
           )}
         </Animated.View>
@@ -432,14 +392,44 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     overflow: 'hidden',
   },
-  tileCrossed: { backgroundColor: colors.goldSoft, borderColor: colors.lineStrong },
+  // "Alive vs dead": an uncrossed tile stays fully colorful/vibrant (unchanged for now);
+  // a crossed one is deliberately desaturated — grey, not gold — to read as drained of
+  // color/life rather than just "a different accent." Went gold-branded for one round
+  // and back — the gold wash read as still-vibrant/still-alive, working against the
+  // "dead" read a completed tile is going for here. `cardSunk`/`lineStrong` are this
+  // app's existing neutral "recessed" tokens, not a new color.
+  tileCrossed: { backgroundColor: colors.cardSunk, borderColor: colors.lineStrong },
   tileCenter: { backgroundColor: colors.ink, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
   freeStar: { color: colors.stampGold, fontSize: 20 },
   freeText: { color: '#fff', fontSize: 8, fontWeight: '900', letterSpacing: 1, marginTop: 1 },
   tileEmoji: { fontSize: 15, marginBottom: 2 },
   tileLabel: { fontSize: 8.5, lineHeight: 10, textAlign: 'center', color: colors.ink, fontWeight: '700' },
-  tileLabelCrossed: { color: colors.goldInk, opacity: 0.55, textDecorationLine: 'line-through' },
-  stampWrap: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
+  // Full opacity, not faded to near-invisible — a friend glancing at a shared card needs
+  // to actually read what got done. Grey/muted (not the brand gold), matching the
+  // desaturated "dead" background rather than the still-warm gold trio.
+  tileLabelCrossed: { color: colors.inkFaint, textDecorationLine: 'line-through' },
+  // A small filled circle, not a bare mark floating on the tile — still the same
+  // green-circle-checkmark language TileSheetScreen's plan-step checkboxes use... except
+  // recolored to `colors.ink` (the FREE tile's own fill color) rather than green, to
+  // keep this accent neutral rather than adding a third competing color to the grid.
+  doneBadge: {
+    position: 'absolute',
+    top: 1,
+    right: 2,
+    backgroundColor: colors.ink,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Top-right, same corner as doneBadge — never shown together, since crossing a tile
+  // off always clears its focus.
+  focusBadge: {
+    position: 'absolute',
+    top: 1,
+    right: 2,
+    backgroundColor: colors.stampGold,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   // reward ticket
   rewardTicket: {

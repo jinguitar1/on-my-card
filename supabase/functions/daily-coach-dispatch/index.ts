@@ -1,15 +1,18 @@
 // On My Card — daily-coach-dispatch Edge Function
 //
-// Triggered hourly by a pg_cron job (see migration add_coach_breakdown_and_push),
-// never by a user directly — there is no user JWT here, only a shared secret in
-// the `x-cron-secret` header checked against the CRON_DISPATCH_SECRET env secret.
-// On a match, uses SUPABASE_SERVICE_ROLE_KEY (auto-injected, never set manually)
-// to scan every opted-in user's push_prefs row, and — for whoever's local hour
-// matches their chosen coach_hour and hasn't already been sent today — generates
-// one Claude nudge (same prompt as ai-insights' "nudge" kind, from the shared
-// module so the two paths can never drift apart), upserts it into ai_insights so
-// the Card tab shows the identical content, and sends it as a push via Expo's
-// push service. See public.push_prefs' table comment for the full data-flow story.
+// Triggered every 5 minutes by a pg_cron job (see migrations add_coach_breakdown_and_push
+// and add_coach_minutes), never by a user directly — there is no user JWT here, only a
+// shared secret in the `x-cron-secret` header checked against the CRON_DISPATCH_SECRET
+// env secret. On a match, uses SUPABASE_SERVICE_ROLE_KEY (auto-injected, never set
+// manually) to scan every opted-in user's push_prefs row, and — for whoever's local
+// minute-of-day is in their chosen coach_minutes (they can pick more than one time a
+// day, each snapped to a 5-minute increment client-side so it always lines up with a
+// cron tick), today's local weekday is in coach_days, and this exact (date, minute)
+// slot hasn't already been sent — generates one Claude nudge (same prompt as
+// ai-insights' "nudge" kind, from the shared module so the two paths can never drift
+// apart), upserts it into ai_insights so the Card tab shows the identical content, and
+// sends it as a push via Expo's push service. See public.push_prefs' table comment for
+// the full data-flow story.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -24,17 +27,34 @@ interface PushPrefRow {
   user_id: string;
   expo_push_token: string | null;
   timezone: string;
-  coach_hour: number;
+  coach_minutes: number[];
+  coach_days: number[];
   enabled: boolean;
-  last_sent_date: string | null;
+  last_sent_slot: string | null;
 }
 
-function localHour(timezone: string, now: Date): number {
+const WEEKDAY_INDEX: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+/** Minutes since local midnight (0-1439). The cron ticks every 5 minutes and the client
+ *  only lets you pick a 5-minute-increment time, so this always lines up exactly with a
+ *  chosen coach_minutes value instead of needing any "close enough" fuzzy matching. */
+function localMinuteOfDay(timezone: string, now: Date): number {
   try {
-    const parts = new Intl.DateTimeFormat('en-US', { timeZone: timezone, hour: 'numeric', hour12: false }).formatToParts(now);
-    return parseInt(parts.find((p) => p.type === 'hour')?.value ?? '0', 10) % 24;
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: timezone, hour: 'numeric', minute: 'numeric', hour12: false }).formatToParts(now);
+    const hour = parseInt(parts.find((p) => p.type === 'hour')?.value ?? '0', 10) % 24;
+    const minute = parseInt(parts.find((p) => p.type === 'minute')?.value ?? '0', 10);
+    return hour * 60 + minute;
   } catch {
-    return now.getUTCHours(); // an invalid stored timezone falls back to UTC rather than throwing
+    return now.getUTCHours() * 60 + now.getUTCMinutes(); // an invalid stored timezone falls back to UTC rather than throwing
+  }
+}
+
+function localWeekday(timezone: string, now: Date): number {
+  try {
+    const short = new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short' }).format(now);
+    return WEEKDAY_INDEX[short] ?? now.getUTCDay();
+  } catch {
+    return now.getUTCDay();
   }
 }
 
@@ -53,6 +73,14 @@ async function sendExpoPush(token: string, body: string): Promise<void> {
     body: JSON.stringify([{ to: token, title: 'Your coach', body, sound: 'default' }]),
   });
   if (!res.ok) throw new Error(`Expo push API ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}`);
+  // Expo can return 200 OK at the HTTP layer while the individual ticket inside still
+  // reports a failure (e.g. missing APNs credentials, DeviceNotRegistered) — checking
+  // res.ok alone was silently treating those as delivered.
+  const payload = await res.json().catch(() => null);
+  const ticket = payload?.data?.[0];
+  if (ticket?.status === 'error') {
+    throw new Error(`Expo push ticket error: ${ticket.message ?? 'unknown'} (${ticket.details?.error ?? 'no code'})`);
+  }
 }
 
 Deno.serve(async (req) => {
@@ -68,7 +96,7 @@ Deno.serve(async (req) => {
 
   const { data: prefs, error: prefsErr } = await supabase
     .from('push_prefs')
-    .select('user_id, expo_push_token, timezone, coach_hour, enabled, last_sent_date')
+    .select('user_id, expo_push_token, timezone, coach_minutes, coach_days, enabled, last_sent_slot')
     .eq('enabled', true)
     .not('expo_push_token', 'is', null);
   if (prefsErr) return json({ error: prefsErr.message }, 500);
@@ -78,9 +106,13 @@ Deno.serve(async (req) => {
   let failed = 0;
 
   for (const row of (prefs ?? []) as PushPrefRow[]) {
-    const hour = localHour(row.timezone, now);
+    const minuteOfDay = localMinuteOfDay(row.timezone, now);
+    const weekday = localWeekday(row.timezone, now);
     const today = localDateKey(row.timezone, now);
-    if (hour !== row.coach_hour || row.last_sent_date === today) {
+    // "<local date>T<minute-of-day>" — lets each distinct time slot the same day fire
+    // once, while a second cron tick within the same 5-minute window (retry) is a no-op.
+    const slot = `${today}T${minuteOfDay}`;
+    if (!row.coach_minutes.includes(minuteOfDay) || !row.coach_days.includes(weekday) || row.last_sent_slot === slot) {
       skipped++;
       continue;
     }
@@ -88,7 +120,7 @@ Deno.serve(async (req) => {
     try {
       const { data: stateRow } = await supabase.from('app_state').select('state').eq('user_id', row.user_id).maybeSingle();
       const state = stateRow?.state as AppStateShape | undefined;
-      if (!state?.card || state.card.tiles.length === 0) {
+      if (!state?.cards?.length || state.cards[0].tiles.length === 0) {
         skipped++;
         continue;
       }
@@ -101,7 +133,7 @@ Deno.serve(async (req) => {
 
       await sendExpoPush(row.expo_push_token!, content);
 
-      await supabase.from('push_prefs').update({ last_sent_date: today }).eq('user_id', row.user_id);
+      await supabase.from('push_prefs').update({ last_sent_slot: slot }).eq('user_id', row.user_id);
       sent++;
     } catch (err) {
       console.error(`daily-coach-dispatch failed for user ${row.user_id}`, err);

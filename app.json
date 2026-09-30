@@ -9,7 +9,10 @@
     "backgroundColor": "#FBF6EA",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.mooboomoo.on-my-card"
+      "bundleIdentifier": "com.mooboomoo.on-my-card",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {

@@ -1,6 +1,6 @@
 /**
  * On My Card — "warm paper card" design tokens. Light-only
- * (app.json pins userInterfaceStyle: "light").
+ * (app.config.js pins userInterfaceStyle: "light").
  */
 
 import { Platform } from 'react-native';

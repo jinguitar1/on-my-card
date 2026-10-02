@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Alert, Animated, Easing, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useInsight } from '../ai/useInsight';
@@ -18,7 +18,7 @@ import { RadarChart } from '../ui/RadarChart';
  *  shows any of it, by design (see CardDashboardScreen). */
 export default function CardDetailScreen({ route, navigation }: any) {
   const cardId: string = route.params?.cardId;
-  const { state, setFocusedTile, renameCard, setCardEmoji } = useApp();
+  const { state, setFocusedTile, renameCard, setCardEmoji, deleteCard } = useApp();
   const { width } = useWindowDimensions();
   const card = state.cards.find((c) => c.id === cardId);
 
@@ -68,11 +68,33 @@ export default function CardDetailScreen({ route, navigation }: any) {
   const focusedTile = card.tiles.find((t) => t.id === card.focusedTileId);
   const nearMiss = new Map(nearMissLines(card).map((n) => [n.missingCell, colors.stampGold]));
 
+  const handleDelete = () => {
+    Alert.alert(
+      'Delete this card?',
+      `"${card.title}" and everything on it will be permanently deleted. This can't be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            deleteCard(cardId);
+            navigation.goBack();
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        onScrollBeginDrag={Keyboard.dismiss}
+      >
         <Pressable onPress={() => navigation.goBack()} style={styles.backLink}>
-          <Text style={styles.backLinkText}>← My Cards</Text>
+          <Text style={styles.backLinkText}>← Home</Text>
         </Pressable>
 
         <View style={styles.titleRow}>
@@ -231,6 +253,10 @@ export default function CardDetailScreen({ route, navigation }: any) {
             {showRadar && <RadarChart data={radar} focusedCategory={focusedTile?.category} />}
           </>
         )}
+
+        <Pressable style={styles.deleteCard} onPress={handleDelete}>
+          <Text style={styles.deleteCardText}>🗑️ Delete this card</Text>
+        </Pressable>
       </ScrollView>
 
       <Confetti trigger={confettiTrigger} intensity="burst" accent={colors.stampGold} />
@@ -376,4 +402,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
     elevation: 10,
   },
+  deleteCard: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    marginTop: space.xxl,
+    paddingVertical: space.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+  },
+  deleteCardText: { ...type.label, color: colors.danger },
 });

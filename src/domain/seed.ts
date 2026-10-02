@@ -10,7 +10,7 @@ export function emptyState(): AppState {
   return {
     schemaVersion: SCHEMA_VERSION,
     cards: [],
-    draftCard: null,
+    draftCards: [],
     settings: { ...DEFAULT_SETTINGS },
     log: [],
   };

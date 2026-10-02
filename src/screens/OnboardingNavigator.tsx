@@ -38,11 +38,10 @@ export default function OnboardingNavigator() {
       kept={kept}
       defaultTitle={`My ${new Date().getFullYear()} Card`}
       ctaLabel="Enter my card"
-      onSave={(title, emoji) => {
+      onSave={(title) => {
         createCard(
           kept.map((t) => ({ label: t.label, emoji: t.emoji, note: t.note, category: t.category, bankId: t.id })),
-          title,
-          emoji
+          title
         );
         void updateSettings({ onboardingComplete: true });
       }}

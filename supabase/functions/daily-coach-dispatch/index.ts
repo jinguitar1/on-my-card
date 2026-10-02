@@ -16,7 +16,7 @@
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
-import { AppStateShape, CORS_HEADERS, MODEL, NUDGE_SYSTEM, buildNudgePrompt, callClaude, json, summarize, todayKey } from '../_shared/coach.ts';
+import { AppStateShape, MODEL, NUDGE_SYSTEM, buildNudgePrompt, callClaude, corsHeaders, json, summarize, todayKey } from '../_shared/coach.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -84,11 +84,12 @@ async function sendExpoPush(token: string, body: string): Promise<void> {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
+  const origin = req.headers.get('origin');
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders(origin) });
   if (req.headers.get('x-cron-secret') !== CRON_DISPATCH_SECRET || !CRON_DISPATCH_SECRET) {
-    return json({ error: 'unauthorized' }, 401);
+    return json({ error: 'unauthorized' }, 401, origin);
   }
-  if (!ANTHROPIC_API_KEY) return json({ error: 'server not configured' }, 500);
+  if (!ANTHROPIC_API_KEY) return json({ error: 'server not configured' }, 500, origin);
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
   const now = new Date();
@@ -99,7 +100,10 @@ Deno.serve(async (req) => {
     .select('user_id, expo_push_token, timezone, coach_minutes, coach_days, enabled, last_sent_slot')
     .eq('enabled', true)
     .not('expo_push_token', 'is', null);
-  if (prefsErr) return json({ error: prefsErr.message }, 500);
+  if (prefsErr) {
+    console.error(prefsErr);
+    return json({ error: 'failed to load push preferences' }, 500, origin);
+  }
 
   let sent = 0;
   let skipped = 0;
@@ -141,5 +145,5 @@ Deno.serve(async (req) => {
     }
   }
 
-  return json({ sent, skipped, failed, total: prefs?.length ?? 0 });
+  return json({ sent, skipped, failed, total: prefs?.length ?? 0 }, 200, origin);
 });

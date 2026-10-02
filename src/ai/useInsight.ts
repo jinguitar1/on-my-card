@@ -14,7 +14,7 @@ import { supabase } from '../lib/supabaseClient';
  * `useAuth().status === 'signedIn'` before rendering anything from this hook.
  */
 
-export type InsightKind = 'nudge' | 'reflection' | 'breakdown';
+export type InsightKind = 'nudge' | 'reflection' | 'breakdown' | 'tilesuggest';
 export type PeriodType = 'weekly' | 'monthly';
 
 export interface Insight {
@@ -30,6 +30,9 @@ export interface UseInsightOptions {
   periodType?: PeriodType;
   /** Required for kind: 'breakdown' — the tile this plan is for. */
   tileId?: string;
+  /** Required for kind: 'tilesuggest' — which card and empty square the ideas are for. */
+  cardId?: string;
+  cell?: number;
   /** Fetch automatically on mount (default true). Set false for anything heavier
    *  than the daily nudge/reflection — e.g. a tile breakdown, which should only
    *  generate when the user explicitly taps "Get a plan," not every time the tile
@@ -60,7 +63,7 @@ interface UseInsightResult {
 }
 
 export function useInsight(kind: InsightKind, options: UseInsightOptions = {}): UseInsightResult {
-  const { periodType, tileId, auto = true } = options;
+  const { periodType, tileId, cardId, cell, auto = true } = options;
   const { status } = useAuth();
   const [insight, setInsight] = useState<Insight | null>(null);
   const [loading, setLoading] = useState(false);
@@ -74,11 +77,12 @@ export function useInsight(kind: InsightKind, options: UseInsightOptions = {}): 
         return;
       }
       if (kind === 'breakdown' && !tileId) return;
+      if (kind === 'tilesuggest' && (!cardId || cell === undefined)) return;
       const id = ++requestId.current;
       setLoading(true);
       setError(null);
       void supabase.functions
-        .invoke('ai-insights', { body: { kind, periodType, tileId, force, context } })
+        .invoke('ai-insights', { body: { kind, periodType, tileId, cardId, cell, force, context } })
         .then(({ data, error: fnError }) => {
           if (id !== requestId.current) return; // a newer request superseded this one
           if (fnError) {
@@ -100,7 +104,7 @@ export function useInsight(kind: InsightKind, options: UseInsightOptions = {}): 
           if (id === requestId.current) setLoading(false);
         });
     },
-    [status, kind, periodType, tileId]
+    [status, kind, periodType, tileId, cardId, cell]
   );
 
   useEffect(() => {

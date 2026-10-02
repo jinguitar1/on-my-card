@@ -1,18 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { type TileIdea } from '../domain/tileBank';
 import { CELL_COUNT, CENTER, GRID } from '../domain/types';
 import { Confetti } from '../feedback/Celebration';
 import { triumphHit } from '../feedback/haptics';
-import { CardTile, PrimaryButton, cardLayout } from '../ui/components';
+import { CardTile, DismissKeyboardView, PrimaryButton, cardLayout } from '../ui/components';
 import { colors, space, type } from '../ui/theme';
 
 /** The finished-card reveal moment — the swiped-through tiles stamp in with confetti,
  *  then the user names the card right there before it's saved. Shared by first-run
  *  onboarding and the in-app "create a new card" flow, which only differ in what
- *  happens once the name is confirmed (`onSave`) and the button's wording (`ctaLabel`). */
+ *  happens once the name is confirmed (`onSave`) and the button's wording (`ctaLabel`).
+ *  No emoji field here anymore — a card's emoji is still a real, editable field
+ *  (CardDetailScreen's tap-to-edit), just no longer something to decide at the exact
+ *  moment of creation; this screen is about naming the card and nothing else. */
 export function CardReveal({
   kept,
   defaultTitle,
@@ -22,13 +25,12 @@ export function CardReveal({
   kept: TileIdea[];
   defaultTitle: string;
   ctaLabel: string;
-  onSave: (title: string, emoji: string) => void;
+  onSave: (title: string) => void;
 }) {
   const { width } = useWindowDimensions();
   const gridW = Math.min(width - space.lg * 2, 420);
   const layout = useMemo(() => cardLayout(gridW), [gridW]);
   const [title, setTitle] = useState(defaultTitle);
-  const [emoji, setEmoji] = useState('');
 
   useEffect(() => {
     triumphHit();
@@ -36,6 +38,8 @@ export function CardReveal({
 
   return (
     <SafeAreaView style={styles.safe}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <DismissKeyboardView>
       <View style={styles.revealWrap}>
         <Text style={styles.revealHeadline}>Your card is ready.</Text>
         <View style={[styles.gridWrap, { width: gridW, height: gridW }]}>
@@ -61,28 +65,21 @@ export function CardReveal({
         <Confetti trigger={1} intensity="full" accent={colors.stampGold} />
 
         <Text style={styles.nameLabel}>Name your card</Text>
-        <View style={styles.nameRow}>
-          <TextInput
-            value={emoji}
-            onChangeText={setEmoji}
-            placeholder="🙂"
-            placeholderTextColor={colors.inkFaint}
-            style={styles.emojiInput}
-          />
-          <TextInput
-            value={title}
-            onChangeText={setTitle}
-            placeholder="Name your card"
-            placeholderTextColor={colors.inkFaint}
-            style={[styles.nameInput, { flex: 1 }]}
-            autoFocus
-            selectTextOnFocus
-          />
-        </View>
+        <TextInput
+          value={title}
+          onChangeText={setTitle}
+          placeholder="Name your card"
+          placeholderTextColor={colors.inkFaint}
+          style={styles.nameInput}
+          autoFocus
+          selectTextOnFocus
+        />
       </View>
       <View style={styles.footer}>
-        <PrimaryButton label={ctaLabel} onPress={() => onSave(title, emoji)} disabled={!title.trim()} style={{ flex: 1 }} />
+        <PrimaryButton label={ctaLabel} onPress={() => onSave(title)} disabled={!title.trim()} style={{ flex: 1 }} />
       </View>
+      </DismissKeyboardView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -94,19 +91,8 @@ const styles = StyleSheet.create({
   revealHeadline: { ...type.display, textAlign: 'center', marginBottom: space.xl },
   gridWrap: { position: 'relative' },
   nameLabel: { ...type.kicker, marginTop: space.xl, marginBottom: space.xs },
-  nameRow: { flexDirection: 'row', gap: space.sm, alignSelf: 'stretch' },
-  emojiInput: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.line,
-    fontSize: 24,
-    textAlign: 'center',
-    padding: 0,
-  },
   nameInput: {
+    alignSelf: 'stretch',
     backgroundColor: colors.card,
     borderRadius: 10,
     borderWidth: 1,

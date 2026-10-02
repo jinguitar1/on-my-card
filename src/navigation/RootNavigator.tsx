@@ -59,7 +59,7 @@ function Tabs() {
         tabBarLabelStyle: { fontWeight: '700', fontSize: 11 },
       }}
     >
-      <Tab.Screen name="Card" component={CardStack} options={{ tabBarIcon: tabIcon('🃏') }} />
+      <Tab.Screen name="Card" component={CardStack} options={{ tabBarIcon: tabIcon('🃏'), tabBarLabel: 'Home' }} />
       {FEATURES.rewards && (
         <Tab.Screen name="Rewards" component={RewardsScreen} options={{ tabBarIcon: tabIcon('🎟️') }} />
       )}

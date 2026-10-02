@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthContext';
-import { Card, GhostButton, PrimaryButton, Segmented } from '../../ui/components';
+import { Card, DismissKeyboardView, GhostButton, PrimaryButton, Segmented } from '../../ui/components';
 import { colors, space, type } from '../../ui/theme';
 
 type Step = 'email' | 'code' | 'setPassword' | 'forgot';
@@ -13,6 +13,10 @@ type Mode = 'code' | 'password';
 type Via = 'signin' | 'recovery';
 
 const MIN_PASSWORD_LEN = 6; // matches Supabase's default minimum
+// App-level backstop on top of Supabase Auth's own server-side OTP rate limiting —
+// without this, tapping "Send code"/"Send reset code" again the instant a request
+// resolves has no cooldown at all.
+const RESEND_COOLDOWN_SECONDS = 30;
 
 /**
  * Two ways in, one screen: an emailed one-time code (works for anyone, always) or a
@@ -35,6 +39,13 @@ export default function SignInScreen({ navigation }: any) {
   const [password, setPasswordField] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cooldown, setCooldown] = useState(0);
+
+  useEffect(() => {
+    if (cooldown === 0) return;
+    const timer = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
 
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -49,6 +60,7 @@ export default function SignInScreen({ navigation }: any) {
     setBusy(false);
     if (err) setError(err);
     else {
+      setCooldown(RESEND_COOLDOWN_SECONDS);
       setVia('signin');
       setStep('code');
     }
@@ -61,6 +73,7 @@ export default function SignInScreen({ navigation }: any) {
     setBusy(false);
     if (err) setError(err);
     else {
+      setCooldown(RESEND_COOLDOWN_SECONDS);
       setVia('recovery');
       setStep('code');
     }
@@ -111,7 +124,7 @@ export default function SignInScreen({ navigation }: any) {
           </Pressable>
         </View>
 
-        <View style={styles.content}>
+        <DismissKeyboardView style={styles.content}>
           {step === 'email' && (
             <Card style={{ gap: space.md }}>
               <Text style={type.h2}>Back up this card</Text>
@@ -155,7 +168,11 @@ export default function SignInScreen({ navigation }: any) {
               )}
               {error && <Text style={styles.error}>{error}</Text>}
               {mode === 'code' ? (
-                <PrimaryButton label={busy ? 'Sending…' : 'Send code'} onPress={handleSendCode} disabled={!emailValid || busy} />
+                <PrimaryButton
+                  label={busy ? 'Sending…' : cooldown > 0 ? `Resend in ${cooldown}s` : 'Send code'}
+                  onPress={handleSendCode}
+                  disabled={!emailValid || busy || cooldown > 0}
+                />
               ) : (
                 <>
                   <PrimaryButton
@@ -192,7 +209,11 @@ export default function SignInScreen({ navigation }: any) {
                 style={styles.input}
               />
               {error && <Text style={styles.error}>{error}</Text>}
-              <PrimaryButton label={busy ? 'Sending…' : 'Send reset code'} onPress={handleSendRecoveryCode} disabled={!emailValid || busy} />
+              <PrimaryButton
+                label={busy ? 'Sending…' : cooldown > 0 ? `Resend in ${cooldown}s` : 'Send reset code'}
+                onPress={handleSendRecoveryCode}
+                disabled={!emailValid || busy || cooldown > 0}
+              />
               <GhostButton label="Back" onPress={() => setStep('email')} disabled={busy} />
             </Card>
           )}
@@ -248,7 +269,7 @@ export default function SignInScreen({ navigation }: any) {
               {via !== 'recovery' && <GhostButton label="Skip" onPress={() => navigation.goBack()} disabled={busy} />}
             </Card>
           )}
-        </View>
+        </DismissKeyboardView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

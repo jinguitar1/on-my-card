@@ -50,11 +50,18 @@ interface AppApi {
   dismissCelebration: () => void;
   syncStatus: { lastSyncedAt: number | null; lastError: string | null };
 
-  createCard: (kept: TileSeed[], title: string, emoji?: string) => void;
+  createCard: (kept: TileSeed[], title: string, emoji?: string, intent?: string) => void;
   renameCard: (cardId: string, title: string) => void;
   setCardEmoji: (cardId: string, emoji: string) => void;
-  saveDraftCard: (kept: DraftCardTile[], rejected: DraftCardTile[], usedSecondPass: boolean) => void;
-  clearDraftCard: () => void;
+  deleteCard: (cardId: string) => void;
+  saveDraftCard: (
+    draftId: string,
+    kept: DraftCardTile[],
+    rejected: DraftCardTile[],
+    usedSecondPass: boolean,
+    extra?: { title?: string; pool?: DraftCardTile[]; intent?: string; source?: 'bank' | 'ai'; generating?: boolean; genError?: string }
+  ) => void;
+  clearDraftCard: (draftId: string) => void;
 
   pressTile: (cardId: string, cell: number) => TileOutcome;
   setTileDone: (cardId: string, cell: number, done: boolean) => void;
@@ -168,14 +175,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (loadedRaw) {
         const raw = loadedRaw as unknown as
           | AppState
-          | { schemaVersion: 4; card: Card | null; settings: AppState['settings']; log: AppState['log'] };
+          | { schemaVersion: 4; card: Card | null; settings: AppState['settings']; log: AppState['log'] }
+          // The pre-multi-draft shape: one `draftCard: DraftCard | null` slot instead of
+          // `draftCards: DraftCard[]` — same "additive field changed shape" situation
+          // `draftCard` itself was added under, so it gets the same lossless, no-
+          // version-bump transform treatment below rather than a schema bump.
+          | (Omit<AppState, 'draftCards'> & { draftCard?: DraftCard | null });
         if (raw.schemaVersion === SCHEMA_VERSION) {
           loaded = raw as AppState;
         } else if (raw.schemaVersion === 4 && 'card' in raw) {
           loaded = {
             schemaVersion: SCHEMA_VERSION,
             cards: raw.card ? [{ ...raw.card, id: uid('card') }] : [],
-            draftCard: null,
+            draftCards: [],
             settings: raw.settings,
             log: raw.log,
           };
@@ -184,10 +196,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Merge onto DEFAULT_SETTINGS (not a bare pass-through) so a settings field added
       // after some data was already persisted — same schemaVersion, just missing a key
       // that didn't exist yet — backfills to its default instead of reading as
-      // `undefined` at every call site. `draftCard` gets the same treatment: it was
-      // added after v5 shipped, so old v5 data simply lacks the key.
+      // `undefined` at every call site. `draftCards` gets an analogous backfill: either
+      // it's already a list (current shape), or this is pre-multi-draft data carrying the
+      // old singular `draftCard` key, wrapped into a one-item list, or neither existed yet
+      // at all (empty list) — covering both "field added later" and "field's shape
+      // changed later" with the same merge step.
+      const oldSingular = (loaded as unknown as { draftCard?: DraftCard | null } | null)?.draftCard;
       const base = loaded
-        ? { ...loaded, draftCard: loaded.draftCard ?? null, settings: { ...DEFAULT_SETTINGS, ...loaded.settings } }
+        ? {
+            ...loaded,
+            draftCards: Array.isArray((loaded as AppState).draftCards)
+              ? (loaded as AppState).draftCards
+              : // Old single-slot data predates DraftCard.id entirely — mint one so this
+                // migrated entry is addressable by the new id-keyed saveDraftCard/
+                // clearDraftCard the same as any other draft.
+                oldSingular
+                ? [{ ...oldSingular, id: uid('draft') }]
+                : [],
+            settings: { ...DEFAULT_SETTINGS, ...loaded.settings },
+          }
         : emptyState();
       if (!alive) return;
       commitState(base);
@@ -242,7 +269,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // --- card creation ---
   const createCard = useCallback(
-    (kept: TileSeed[], title: string, emoji?: string) => {
+    (kept: TileSeed[], title: string, emoji?: string, intent?: string) => {
       const s = stateRef.current;
       const tiles: Tile[] = kept.slice(0, 24).map((seed, i) => ({
         id: uid('tile'),
@@ -257,6 +284,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         id: uid('card'),
         title: title.trim() || `My ${new Date().getFullYear()} Card`,
         emoji: emoji?.trim() || undefined,
+        intent: intent?.trim() || undefined,
         year: new Date().getFullYear(),
         createdAt: Date.now(),
         tiles,
@@ -282,13 +310,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  // --- draft card (an in-progress swipe-deck session, paused and resumed) ---
-  const saveDraftCard = useCallback((kept: DraftCardTile[], rejected: DraftCardTile[], usedSecondPass: boolean) => {
-    setState((st) => ({ ...st, draftCard: { kept, rejected, usedSecondPass } }));
+  // Permanent and irreversible on this device — CardDetailScreen is the one place this is
+  // reachable, and only behind its own confirmation dialog, matching how every other
+  // genuinely destructive action in this app (resetAll) requires an explicit confirm.
+  const deleteCard = useCallback((cardId: string) => {
+    setState((st) => {
+      const card = st.cards.find((c) => c.id === cardId);
+      if (!card) return st;
+      return { ...st, cards: st.cards.filter((c) => c.id !== cardId), log: log(st, 'card', `Deleted "${card.title}"`) };
+    });
   }, []);
 
-  const clearDraftCard = useCallback(() => {
-    setState((st) => ({ ...st, draftCard: null }));
+  // --- draft cards (any number of in-progress swipe-deck sessions, paused/resumed/
+  // researching independently of each other — see DraftCard's own comment for why this
+  // is a list, not a single slot) ---
+  const saveDraftCard = useCallback(
+    (
+      draftId: string,
+      kept: DraftCardTile[],
+      rejected: DraftCardTile[],
+      usedSecondPass: boolean,
+      extra?: { title?: string; pool?: DraftCardTile[]; intent?: string; source?: 'bank' | 'ai'; generating?: boolean; genError?: string }
+    ) => {
+      setState((st) => {
+        const next: DraftCard = { id: draftId, kept, rejected, usedSecondPass, ...extra };
+        const exists = st.draftCards.some((d) => d.id === draftId);
+        return {
+          ...st,
+          draftCards: exists ? st.draftCards.map((d) => (d.id === draftId ? next : d)) : [...st.draftCards, next],
+        };
+      });
+    },
+    []
+  );
+
+  const clearDraftCard = useCallback((draftId: string) => {
+    setState((st) => ({ ...st, draftCards: st.draftCards.filter((d) => d.id !== draftId) }));
   }, []);
 
   // --- tile interaction ---
@@ -459,6 +516,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       createCard,
       renameCard,
       setCardEmoji,
+      deleteCard,
       saveDraftCard,
       clearDraftCard,
       pressTile,
@@ -482,6 +540,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       createCard,
       renameCard,
       setCardEmoji,
+      deleteCard,
       saveDraftCard,
       clearDraftCard,
       pressTile,

@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import {
   Animated,
   Easing,
+  Keyboard,
   Pressable,
   StyleSheet,
   Text,
@@ -12,6 +13,31 @@ import {
 
 import { GRID } from '../domain/types';
 import { colors, radius, shadow, space, type } from './theme';
+
+// --- keyboard dismissal -------------------------------------------------
+
+/** Wrap a screen's content in this so tapping anywhere that isn't itself an input or a
+ *  button dismisses the keyboard — plain Views have no touch handler at all, so without
+ *  this a tap on empty space does nothing and a focused TextInput (and the keyboard
+ *  covering the screen) just stays put.
+ *
+ *  Do NOT wrap a ScrollView (or anything containing one) with this — confirmed in
+ *  practice, not just theoretical: it silently ate the scroll gesture entirely on
+ *  SettingsScreen, because this Pressable's own responder negotiation can win out over
+ *  the ScrollView's internal one depending on what's nested inside. For a scrollable
+ *  screen, put `onScrollBeginDrag={Keyboard.dismiss}` directly on the ScrollView instead
+ *  — dismiss-on-scroll rather than tap-anywhere, which doesn't touch the responder chain
+ *  at all and is the standard mobile pattern for this anyway (Mail, Messages, etc.).
+ *  This component is only for screens with no ScrollView at all (e.g. SignInScreen) and
+ *  SwipeDeckScreen was already excluded for a related reason: its own hand-rolled
+ *  PanResponder drag gesture (the swipe cards) risks the same kind of responder conflict. */
+export function DismissKeyboardView({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
+  return (
+    <Pressable style={[{ flex: 1 }, style]} onPress={Keyboard.dismiss} accessible={false}>
+      {children}
+    </Pressable>
+  );
+}
 
 // --- buttons ----------------------------------------------------------
 

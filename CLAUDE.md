@@ -228,7 +228,7 @@ it's instructional, not marketing copy, and only shown once, ever.
 - [src/notifications/push.ts](src/notifications/push.ts) — remote push registration,
   separate from `scheduler.ts`'s local notifications. `registerForPush()` requests
   permission, calls `Notifications.getExpoPushTokenAsync({ projectId })` (needs
-  `app.json`'s `extra.eas.projectId`, populated by `eas init` — done; see the EAS/dev-client
+  `app.config.js`'s `extra.eas.projectId`, populated by `eas init` — done; see the EAS/dev-client
   requirement below) and upserts `public.push_prefs` (deliberately omitting
   `coach_minutes`/`coach_days` from that upsert so a fresh row gets the DB defaults —
   empty minutes, every day — while re-enabling an existing row preserves whatever was
@@ -560,8 +560,28 @@ Sound assets are **generated**, not committed as source of truth: `npm run gen:s
 
 ## Config notes
 
-- `app.json` sets `userInterfaceStyle: "light"` — the UI is designed light-only; there is
-  no dark-mode palette.
+- `app.config.js` (not `app.json` — see below) sets `userInterfaceStyle: "light"` — the UI
+  is designed light-only; there is no dark-mode palette.
+- **Dev-client vs. production are two separate apps on-device, not one.** `app.json` was
+  converted to a dynamic `app.config.js` specifically so the two could stop colliding: both
+  used to share one bundle identifier (`com.mooboomoo.on-my-card`), and since iOS treats
+  matching bundle ids as the same app slot, installing a TestFlight build would silently
+  overwrite a dev-client build already on the phone (and vice versa) — discovered the hard
+  way when a TestFlight install wiped out an in-progress dev-client session with no
+  warning. `app.config.js` branches on `process.env.APP_VARIANT`: anything other than the
+  literal string `"production"` (including unset, i.e. every local `expo run:ios`/
+  `expo start`) resolves to bundle id `com.mooboomoo.on-my-card.dev` and the name "On My
+  Card (Dev)"; only `eas.json`'s `production` build profile sets `APP_VARIANT=production`
+  (via that profile's own `env`, since a cloud build doesn't inherit the local shell) and
+  gets the real `com.mooboomoo.on-my-card` / "On My Card" identity. Deliberately fails
+  safe in the dev direction — a forgotten override lands on the harmless `.dev` identity,
+  never on an accidental collision with the real app. `eas submit` needs no equivalent
+  change: it uploads an already-built `.ipa`, whose bundle id was baked in at `eas build`
+  time, not re-evaluated. The new bundle id needed registering with Apple the first time
+  (EAS handled it automatically the same way it generates any new credential, as part of
+  the normal "let EAS manage credentials" flow). Android has no equivalent split yet —
+  `app.config.js`'s `android` block has no explicit `package` key at all (Expo's default
+  applies), consistent with this project never having attempted an Android build so far.
 - `.claude/settings.json` enables the official `expo` Claude Code plugin.
 - Native `/ios` and `/android` folders are gitignored (managed workflow / prebuild on
   demand).
@@ -691,7 +711,7 @@ Sound assets are **generated**, not committed as source of truth: `npm run gen:s
   prompt/cache row as `ai-insights`'s on-demand `'nudge'` kind, so the Card tab and the
   push always match), and POSTs to Expo's push API
   (`https://exp.host/--/api/v2/push/send`). **Push requires a real device token, which
-  Expo Go cannot provide.** This project is now EAS-linked (`app.json`'s
+  Expo Go cannot provide.** This project is now EAS-linked (`app.config.js`'s
   `extra.eas.projectId` was populated by `eas init`) and has a working iOS dev-client
   build — that required enrolling in the paid Apple Developer Program specifically,
   since a free/Personal-Team Apple ID cannot sign a build with the Push Notifications

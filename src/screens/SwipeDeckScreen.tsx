@@ -2,8 +2,10 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import {
   Animated,
   Dimensions,
+  Keyboard,
   PanResponder,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -42,22 +44,29 @@ export default function SwipeDeckScreen({
   initialKept = [],
   initialRejected = [],
   initialUsedSecondPass = false,
+  customDeck,
 }: {
   onDone: (kept: TileIdea[]) => void;
   onProgress?: (kept: TileIdea[], rejected: TileIdea[], usedSecondPass: boolean) => void;
   initialKept?: TileIdea[];
   initialRejected?: TileIdea[];
   initialUsedSecondPass?: boolean;
+  /** An already-built deck to swipe through instead of the curated bank — e.g. an
+   *  AI-researched set of ideas (see CreateCardScreen). Undefined (the default) keeps the
+   *  original curated-bank behavior unchanged. */
+  customDeck?: TileIdea[];
 }) {
   const sound = useSound();
-  const [deck, setDeck] = useState<TileIdea[]>(() =>
-    buildDeck(new Set([...initialKept, ...initialRejected].map((t) => t.id)))
-  );
+  const [deck, setDeck] = useState<TileIdea[]>(() => {
+    const exclude = new Set([...initialKept, ...initialRejected].map((t) => t.id));
+    return customDeck ? customDeck.filter((t) => !exclude.has(t.id)) : buildDeck(exclude);
+  });
   const [rejected, setRejected] = useState<TileIdea[]>(initialRejected);
   const [kept, setKept] = useState<TileIdea[]>(initialKept);
   const [usedSecondPass, setUsedSecondPass] = useState(initialUsedSecondPass);
   const [writing, setWriting] = useState(false);
   const [customText, setCustomText] = useState('');
+  const [showKept, setShowKept] = useState(false);
   const cardRef = useRef<SwipeCardHandle>(null);
 
   useEffect(() => {
@@ -76,6 +85,10 @@ export default function SwipeDeckScreen({
 
   const current = deck[0];
   const upNext = deck[1];
+  // AI-researched tiles always carry a real explanatory note (unfamiliar jargon, a
+  // parade/dish name, etc.) — that's not optional flavor text the way a curated-bank
+  // note sometimes is, so it defaults to visible instead of hidden behind the ⓘ tap.
+  const aiSourced = !!customDeck;
 
   function addCustom() {
     const label = customText.trim();
@@ -133,6 +146,20 @@ export default function SwipeDeckScreen({
 
   return (
     <View style={styles.wrap}>
+      {/* A normal in-flow element (not position:absolute) specifically so it can never
+          overlap the progress bar below it — the earlier absolute-positioned version sat
+          at the same y-coordinate as the progress bar's own top edge and visibly covered
+          part of the gold fill. Hidden while the panel itself is open — the panel already
+          has its own clearer "Kept so far (N)" header + ✕, so leaving this visible on top
+          of it was just duplicate clutter at the exact spot the panel's own close control
+          lives. Left-aligned so it never sits right next to this screen's own top-right
+          "Close" control (CreateCardScreen's header) either. */}
+      {!showKept && (
+        <Pressable style={styles.keptToggle} onPress={() => setShowKept(true)} hitSlop={8}>
+          <Text style={styles.keptToggleText}>📋 Kept ({kept.length})</Text>
+        </Pressable>
+      )}
+
       <View style={styles.progressRow}>
         <ProgressBar pct={progressPct} color={colors.stampGold} height={6} />
         <Text style={styles.progressHint}>Swipe right to keep · left to skip · {kept.length}/{TARGET_KEEPS} kept</Text>
@@ -142,7 +169,7 @@ export default function SwipeDeckScreen({
         {upNext && (
           <View style={[styles.peek, { width: CARD_W, height: CARD_H, backgroundColor: categoryWash(upNext.category, 0.18) }]} />
         )}
-        <SwipeCard key={current.id} ref={cardRef} idea={current} onSwipeComplete={handleSwipe} />
+        <SwipeCard key={current.id} ref={cardRef} idea={current} onSwipeComplete={handleSwipe} noteShownByDefault={aiSourced} />
       </View>
 
       {writing ? (
@@ -154,6 +181,8 @@ export default function SwipeDeckScreen({
             placeholderTextColor={colors.inkFaint}
             style={styles.writeInput}
             autoFocus
+            returnKeyType="done"
+            onSubmitEditing={() => Keyboard.dismiss()}
           />
           <View style={styles.writeBtns}>
             <GhostButton label="Cancel" onPress={() => { setWriting(false); setCustomText(''); }} style={{ flex: 1 }} />
@@ -169,6 +198,31 @@ export default function SwipeDeckScreen({
           <GhostButton label="✎ Write your own instead" onPress={() => setWriting(true)} />
         </>
       )}
+
+      {showKept && (
+        <>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowKept(false)} />
+          <View style={styles.keptPanel}>
+            <View style={styles.keptHeader}>
+              <Text style={styles.keptTitle}>Kept so far ({kept.length})</Text>
+              <Pressable onPress={() => setShowKept(false)} hitSlop={12}>
+                <Text style={styles.keptClose}>✕</Text>
+              </Pressable>
+            </View>
+            <ScrollView style={styles.keptList} showsVerticalScrollIndicator={false}>
+              {kept.length === 0 && <Text style={styles.keptEmpty}>Nothing kept yet.</Text>}
+              {kept.map((t) => (
+                <View key={t.id} style={styles.keptRow}>
+                  <Text style={styles.keptEmoji}>{t.emoji}</Text>
+                  <Text style={styles.keptLabel} numberOfLines={2}>
+                    {t.label}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </>
+      )}
     </View>
   );
 }
@@ -179,10 +233,13 @@ interface SwipeCardHandle {
   swipe: (direction: 'left' | 'right') => void;
 }
 
-const SwipeCard = forwardRef<SwipeCardHandle, { idea: TileIdea; onSwipeComplete: (direction: 'left' | 'right') => void }>(
-  function SwipeCard({ idea, onSwipeComplete }, ref) {
+const SwipeCard = forwardRef<
+  SwipeCardHandle,
+  { idea: TileIdea; onSwipeComplete: (direction: 'left' | 'right') => void; noteShownByDefault?: boolean }
+>(
+  function SwipeCard({ idea, onSwipeComplete, noteShownByDefault }, ref) {
     const pan = useRef(new Animated.ValueXY()).current;
-    const [noteShown, setNoteShown] = useState(false);
+    const [noteShown, setNoteShown] = useState(!!noteShownByDefault);
     const done = useRef(false);
 
     function forceSwipe(direction: 'left' | 'right') {
@@ -286,4 +343,36 @@ const styles = StyleSheet.create({
     color: colors.ink,
   },
   writeBtns: { flexDirection: 'row', gap: space.sm, marginTop: space.sm },
+  keptToggle: {
+    alignSelf: 'flex-start',
+    marginLeft: space.lg,
+    marginBottom: space.sm,
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    ...shadow.lift,
+  },
+  keptToggleText: { ...type.label, color: colors.ink },
+  keptPanel: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    width: Math.min(SCREEN_W * 0.72, 300),
+    backgroundColor: colors.paper,
+    borderTopRightRadius: radius.lg,
+    borderBottomRightRadius: radius.lg,
+    paddingTop: space.xl,
+    paddingHorizontal: space.lg,
+    ...shadow.lift,
+  },
+  keptHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: space.md },
+  keptTitle: { ...type.label, color: colors.ink },
+  keptClose: { fontSize: 16, color: colors.inkFaint },
+  keptList: { flex: 1 },
+  keptEmpty: { ...type.body, color: colors.inkFaint },
+  keptRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.sm, borderBottomWidth: 1, borderBottomColor: colors.line },
+  keptEmoji: { fontSize: 20 },
+  keptLabel: { ...type.body, color: colors.ink, flex: 1 },
 });

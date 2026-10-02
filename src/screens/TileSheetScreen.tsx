@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useInsight } from '../ai/useInsight';
 import { useAuth } from '../auth/AuthContext';
@@ -27,6 +27,80 @@ function parseSteps(content: string | undefined): BreakdownStep[] {
     // ignore — the Edge Function already normalizes this, but stay defensive
   }
   return [];
+}
+
+interface TileIdea {
+  emoji: string;
+  label: string;
+  note: string;
+}
+
+function parseIdeas(content: string | undefined): TileIdea[] {
+  if (!content) return [];
+  try {
+    const parsed = JSON.parse(content);
+    if (Array.isArray(parsed?.tiles)) return parsed.tiles;
+  } catch {
+    // ignore — the Edge Function already normalizes this, but stay defensive
+  }
+  return [];
+}
+
+/** The "Research an idea with AI" option for an empty/swap square — aware of every
+ *  tile already on this specific card (threaded through as cardId server-side) so it
+ *  never suggests a duplicate. Shares the exact `{tiles:[{emoji,label,note}]}` shape
+ *  tilegen already uses, just for 3 ideas instead of a full 24-30-tile deck. Tapping an
+ *  idea applies it immediately, same as a bank suggestion — no extra preview step. */
+function AiIdeaPicker({ cardId, cell, onPick }: { cardId: string; cell: number; onPick: (idea: TileIdea) => void }) {
+  const { insight, loading, refresh } = useInsight('tilesuggest', { cardId, cell, auto: false });
+  const ideas = useMemo(() => parseIdeas(insight?.content), [insight]);
+
+  if (ideas.length === 0) {
+    // This can genuinely take up to a minute (the same web-search round trip tilegen's
+    // card generation does) — the request itself doesn't depend on this screen staying
+    // open (it's a plain network call, not tied to the component's lifetime), so closing
+    // this sheet or switching tabs never cancels it. The copy says so explicitly rather
+    // than leaving a bare spinner, which read as broken/stuck when the wait ran long.
+    return loading ? (
+      <View style={[styles.breakdownLoading, { marginTop: space.md }]}>
+        <ActivityIndicator color={colors.ink} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.lead}>Researching ideas…</Text>
+          <Text style={styles.hint}>
+            Can take up to a minute. Feel free to close this and keep using the app — come back and tap again
+            when you're ready, it'll pick up right where it left off.
+          </Text>
+        </View>
+      </View>
+    ) : (
+      <GhostButton label="🔍 Research an idea with AI" onPress={() => refresh(false)} style={{ marginTop: space.md }} />
+    );
+  }
+
+  return (
+    <View style={{ marginTop: space.md }}>
+      <Text style={styles.breakdownKicker}>AI RESEARCHED</Text>
+      <View style={{ gap: space.sm }}>
+        {ideas.map((idea, i) => (
+          <Pressable key={i} onPress={() => onPick(idea)} style={styles.suggestion}>
+            <Text style={styles.suggestionEmoji}>{idea.emoji}</Text>
+            <Text style={styles.suggestionLabel}>{idea.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <GhostButton
+        label={loading ? 'Researching…' : '↻ Try different ideas'}
+        onPress={() => refresh(true)}
+        disabled={loading}
+        style={{ marginTop: space.sm }}
+      />
+      {loading && (
+        <Text style={[styles.hint, { marginTop: space.xs }]}>
+          Can take up to a minute — the ideas above stay pickable while new ones research.
+        </Text>
+      )}
+    </View>
+  );
 }
 
 export default function TileSheetScreen({ route, navigation }: any) {
@@ -109,6 +183,13 @@ export default function TileSheetScreen({ route, navigation }: any) {
     navigation.goBack();
   };
 
+  // An AI-researched idea instead of a curated-bank one — no category/bankId, same as
+  // a hand-typed tile, since it isn't from the fixed bank.
+  const pickAi = (idea: TileIdea) => {
+    setTile(cardId, cell, { label: idea.label, emoji: idea.emoji, note: idea.note });
+    navigation.goBack();
+  };
+
   const saveTyped = () => {
     if (!typedLabel.trim()) return;
     setTile(cardId, cell, { label: typedLabel.trim() });
@@ -129,7 +210,12 @@ export default function TileSheetScreen({ route, navigation }: any) {
   if (isEmpty) {
     return (
       <View style={styles.wrap}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={Keyboard.dismiss}
+        >
           <View style={styles.header}>
             <Text style={[type.h1, styles.headerTitle]}>Fill this square</Text>
             <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
@@ -147,6 +233,8 @@ export default function TileSheetScreen({ route, navigation }: any) {
             ))}
           </View>
 
+          {authStatus === 'signedIn' && <AiIdeaPicker cardId={cardId} cell={cell} onPick={pickAi} />}
+
           {!showTypeYourOwn ? (
             <GhostButton label="Or type your own" onPress={() => setShowTypeYourOwn(true)} style={{ marginTop: space.lg }} />
           ) : (
@@ -163,6 +251,7 @@ export default function TileSheetScreen({ route, navigation }: any) {
             </View>
           )}
         </ScrollView>
+        </KeyboardAvoidingView>
       </View>
     );
   }
@@ -170,7 +259,12 @@ export default function TileSheetScreen({ route, navigation }: any) {
   if (showSwapPicker) {
     return (
       <View style={styles.wrap}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={Keyboard.dismiss}
+        >
           <View style={styles.header}>
             <Text style={[type.h1, styles.headerTitle]}>Swap for a different idea</Text>
             <Pressable onPress={() => setShowSwapPicker(false)} hitSlop={8}>
@@ -188,6 +282,8 @@ export default function TileSheetScreen({ route, navigation }: any) {
             ))}
           </View>
 
+          {authStatus === 'signedIn' && <AiIdeaPicker cardId={cardId} cell={cell} onPick={pickAi} />}
+
           {!showTypeYourOwn ? (
             <GhostButton label="Or type your own" onPress={() => setShowTypeYourOwn(true)} style={{ marginTop: space.lg }} />
           ) : (
@@ -204,13 +300,19 @@ export default function TileSheetScreen({ route, navigation }: any) {
             </View>
           )}
         </ScrollView>
+        </KeyboardAvoidingView>
       </View>
     );
   }
 
   return (
     <View style={styles.wrap}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        onScrollBeginDrag={Keyboard.dismiss}
+      >
         <View style={styles.header}>
           <Text style={[type.h1, styles.headerTitle]}>{tile!.emoji} {tile!.label}</Text>
           <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
@@ -262,9 +364,12 @@ export default function TileSheetScreen({ route, navigation }: any) {
               breakdownLoading ? (
                 <View style={styles.breakdownLoading}>
                   <ActivityIndicator color={colors.ink} />
-                  <View>
+                  <View style={{ flex: 1 }}>
                     <Text style={styles.lead}>Researching a plan…</Text>
-                    <Text style={styles.hint}>Looking things up takes a bit longer than a quick guess.</Text>
+                    <Text style={styles.hint}>
+                      Can take up to a minute — it's actually looking things up, not just guessing. Feel free to
+                      close this and keep using the app; come back and your plan will be waiting.
+                    </Text>
                   </View>
                 </View>
               ) : (
@@ -336,11 +441,17 @@ export default function TileSheetScreen({ route, navigation }: any) {
                   disabled={breakdownLoading}
                   style={{ marginTop: space.sm }}
                 />
+                {breakdownLoading && (
+                  <Text style={[styles.hint, { marginTop: space.xs }]}>
+                    Can take up to a minute — the steps above stay usable while the new plan researches.
+                  </Text>
+                )}
               </>
             )}
           </View>
         )}
       </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }

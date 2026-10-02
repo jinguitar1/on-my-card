@@ -5,16 +5,28 @@
 
 export const MODEL = 'claude-sonnet-5';
 
-export const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-cron-secret',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
+// Neither function is meant to be called from a browser — the mobile app's own fetch
+// calls aren't subject to CORS at all, and both endpoints authenticate via an
+// Authorization header/shared secret rather than cookies, so a wildcard origin here
+// bought nothing but unnecessary exposure. This allowlist exists purely so
+// `expo start --web` (local dev only) can still call these functions from a browser.
+const ALLOWED_ORIGINS = new Set<string>(['http://localhost:8081', 'http://localhost:19006']);
 
-export function json(body: unknown, status = 200) {
+export function corsHeaders(origin: string | null): Record<string, string> {
+  return {
+    'Access-Control-Allow-Origin': origin && ALLOWED_ORIGINS.has(origin) ? origin : 'null',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-cron-secret',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    Vary: 'Origin',
+  };
+}
+
+/** `origin` should be the caller's own `req.headers.get('origin')` — pass it through
+ *  so the response's CORS header matches the request that's actually being answered. */
+export function json(body: unknown, status = 200, origin: string | null = null) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+    headers: { ...corsHeaders(origin), 'Content-Type': 'application/json' },
   });
 }
 
@@ -59,6 +71,7 @@ export interface Tile {
 export interface CardShape {
   id: string;
   title: string;
+  intent?: string;
   tiles: Tile[];
   focusedTileId?: string;
 }
@@ -249,6 +262,12 @@ export function buildBreakdownPrompt(tile: Tile, userContext?: string): string {
  *  searches one breakdown can trigger, bounding cost/latency. */
 export const WEB_SEARCH_TOOL = { type: 'web_search_20250305', name: 'web_search', max_uses: 3 };
 
+/** A tighter search budget for tilegen specifically — each round-trip to Anthropic's
+ *  search backend is a meaningful chunk of this call's latency, and generating 24-30
+ *  tiles already takes a while on its own; capping at 2 instead of breakdown's 3 trims
+ *  real wall-clock time with only a small research-depth tradeoff. */
+export const TILEGEN_WEB_SEARCH_TOOL = { type: 'web_search_20250305', name: 'web_search', max_uses: 2 };
+
 /** Calls Claude once. Throws on a non-2xx or an empty response — caller decides
  *  how to surface that (both callers here treat it as a clean 502). Optional `tools`
  *  (only the breakdown path passes any, currently just WEB_SEARCH_TOOL) means the
@@ -305,4 +324,125 @@ export function parseBreakdown(raw: string): { steps: { title: string; detail: s
     // fall through to the single-step fallback below
   }
   return { steps: [{ title: 'Plan', detail: raw.slice(0, 1000) }] };
+}
+
+// --- tilegen: an AI-researched swipe deck for a brand-new card -----------
+// (CreateCardScreen's "Let AI research this" option, behind FEATURES.aiCardGen)
+
+export const TILEGEN_SYSTEM =
+  'You are a practical, well-researched assistant inside "On My Card", an app where the ' +
+  'user builds a 5x5 bingo card of specific things to do or experience, then crosses each ' +
+  'one off once they actually do it (not a daily habit tracker; each tile happens once). ' +
+  'The user is about to build a new card and has told you what it is for. Use the ' +
+  'web_search tool to research real, current, specific things relevant to what they ' +
+  'described (actual named attractions, events, dishes, landmarks, traditions, not generic ' +
+  'categories) rather than relying only on what you already know, especially when they ' +
+  'named a specific place, date, or event. Respect anything they said about their own ' +
+  'preferences or constraints (what they dislike, already know, or want to avoid) by ' +
+  'skipping or deprioritizing ideas that conflict with it, rather than including them ' +
+  'anyway just to pad the list. Return 24 to 30 distinct tile ideas (the card only needs ' +
+  '24; don\'t over-generate beyond a small buffer), biased toward specific and memorable ' +
+  'over generic. Each tile needs a short label (2-5 words), one emoji that fits it, and a ' +
+  'one-sentence note written the way a well-traveled friend would casually explain it to ' +
+  'you in person: warm and specific, never like a brochure, encyclopedia entry, or ' +
+  'marketing copy. The note has to actually teach the user something, not just restate the ' +
+  'label more formally — name the real thing, and say what it looks or feels like or why ' +
+  'it\'s worth doing. This note is the user\'s only in-app explanation of any jargon or ' +
+  'reference (e.g. a parade or dish name), so it must stand alone and genuinely inform, not ' +
+  'just sound nice. Never use an em dash (—) or en dash (–); use a comma, period, or ' +
+  'parentheses instead. After you are done researching, your FINAL message must be ONLY ' +
+  'valid JSON, no markdown fencing, no commentary before or after it, matching exactly: ' +
+  '{"tiles":[{"emoji":"🎉","label":"short label","note":"one sentence explaining what it is"}]}';
+
+export function buildTilegenPrompt(intent: string): string {
+  return `What this card is for, in the user's own words: "${intent.trim()}"\n\nReturn the JSON tile list now.`;
+}
+
+// --- tilesuggest: AI-researched idea(s) for one empty square on a card the ---
+// user already started (TileSheetScreen's empty-cell / swap pickers' "Research
+// an idea with AI" option). Shares tilegen's exact tile JSON shape ({emoji,
+// label, note}) so parseTilegen is reused as-is rather than writing a second
+// parser for an identical format.
+
+export const TILESUGGEST_SYSTEM =
+  'You are a practical, well-researched assistant inside "On My Card", an app where the ' +
+  'user builds a 5x5 bingo card of specific things to do or experience, then crosses each ' +
+  'one off once they actually do it (not a daily habit tracker; each tile happens once). ' +
+  'The card already exists and the user is filling in one remaining empty square on it. ' +
+  'Use the web_search tool when it would genuinely help (e.g. the card is themed around a ' +
+  'real place, trip, or event) to find real, current, specific things relevant to the ' +
+  'card\'s theme (actual named attractions, events, dishes, landmarks, activities, not ' +
+  'generic categories) rather than relying only on what you already know. You are given ' +
+  'every tile already on this card. Every idea you return must be genuinely distinct from ' +
+  'all of them, not just avoiding an exact repeat of the label, but avoiding a near-duplicate ' +
+  'of the same place, activity, or experience under different wording. Return exactly 3 ' +
+  'distinct tile ideas for the one empty square, biased toward specific and memorable over ' +
+  'generic, matching the theme and tone of the card\'s existing tiles (or, if the card has no ' +
+  'clear theme, something that rounds out the mix of categories it already leans toward). ' +
+  'Each tile needs a short label (2-5 words), one emoji that fits it, and a one-sentence note ' +
+  'written the way a well-traveled friend would casually explain it to you in person: warm ' +
+  'and specific, never like a brochure, encyclopedia entry, or marketing copy, and it has to ' +
+  'actually teach the user something, not just restate the label more formally. Never use an ' +
+  'em dash (—) or en dash (–); use a comma, period, or parentheses instead. After you are ' +
+  'done researching, your FINAL message must be ONLY valid JSON, no markdown fencing, no ' +
+  'commentary before or after it, matching exactly: ' +
+  '{"tiles":[{"emoji":"🎉","label":"short label","note":"one sentence explaining what it is"}]}';
+
+export function buildTilesuggestPrompt(card: CardShape): string {
+  const existing = card.tiles.map((t) => ({ label: t.label, note: t.note }));
+  return (
+    `Card title: "${card.title}"\n` +
+    (card.intent?.trim() ? `What this card is for, in the user's own words: "${card.intent.trim()}"\n` : '') +
+    `Every tile already on this card (do not duplicate or near-duplicate any of these): ${JSON.stringify(existing)}\n` +
+    `\nReturn the JSON list of 3 new tile ideas for the empty square now.`
+  );
+}
+
+/** Turns a regex-captured JSON string body (still containing \" \\ etc. escapes) back
+ *  into the real string, by handing it to JSON.parse wrapped in quotes rather than
+ *  reinventing JSON's escaping rules by hand. */
+function unescapeJsonString(raw: string): string {
+  try {
+    return JSON.parse(`"${raw}"`);
+  } catch {
+    return raw;
+  }
+}
+
+/** Confirmed in production logs: a web-search-augmented, high-output call like this one
+ *  truncates mid-generation (hits max_tokens before the closing brackets) far more often
+ *  than a short plain-text reply would — one real capture showed 9 fully-formed, genuinely
+ *  good tiles followed by a cut-off 10th with no closing `]}`. The original parser treated
+ *  that as total failure (JSON.parse throws on an unterminated string) and discarded every
+ *  tile the model *had* finished writing, which is exactly why generation was failing far
+ *  more than it should have. This still tries the clean, complete-JSON path first, and only
+ *  falls back to pulling out each complete {"emoji","label","note"} object via regex (skipping
+ *  whatever trailing partial object never finished) when that fails — a partial deck someone
+ *  can actually swipe through beats a hard error. */
+export function parseTilegen(raw: string): { tiles: { emoji: string; label: string; note: string }[] } {
+  const fenceStripped = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+  const firstBrace = fenceStripped.indexOf('{');
+  const lastBrace = fenceStripped.lastIndexOf('}');
+  const candidate = firstBrace >= 0 && lastBrace > firstBrace ? fenceStripped.slice(firstBrace, lastBrace + 1) : fenceStripped;
+  try {
+    const parsed = JSON.parse(candidate);
+    if (Array.isArray(parsed?.tiles) && parsed.tiles.length > 0) {
+      return {
+        tiles: parsed.tiles
+          .map((t: any) => ({ emoji: String(t.emoji ?? '✨'), label: String(t.label ?? '').trim(), note: String(t.note ?? '').trim() }))
+          .filter((t: { label: string }) => t.label.length > 0),
+      };
+    }
+  } catch {
+    // fall through to salvage mode below
+  }
+  const tileRegex = /\{\s*"emoji"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"label"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"note"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/g;
+  const salvaged: { emoji: string; label: string; note: string }[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = tileRegex.exec(fenceStripped)) !== null) {
+    const label = unescapeJsonString(match[2]).trim();
+    if (!label) continue;
+    salvaged.push({ emoji: unescapeJsonString(match[1]), label, note: unescapeJsonString(match[3]) });
+  }
+  return { tiles: salvaged };
 }

@@ -11,4 +11,7 @@ export const FEATURES = {
   stats: false,
   /** The Rewards tab and the bingo-threshold reward-unlock celebration. */
   rewards: false,
+  /** CreateCardScreen's "Let AI research this" option (tilegen) — an AI-researched deck
+   *  in place of the curated bank for a new card. */
+  aiCardGen: true,
 };

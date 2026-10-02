@@ -9,7 +9,7 @@ import { getPermission } from './scheduler';
  * Remote push registration for the daily coach nudge (see
  * supabase/functions/daily-coach-dispatch). Separate from scheduler.ts's local
  * notifications: this needs a real device token, which needs an EAS-linked project
- * (`app.json`'s `extra.eas.projectId`, populated by `eas init`) and a dev-client build —
+ * (`app.config.js`'s `extra.eas.projectId`, populated by `eas init`) and a dev-client build —
  * Expo Go cannot receive push. Until that's set up, `registerForPush` fails quietly and
  * returns false, same fail-quiet convention as the rest of src/ai.
  */

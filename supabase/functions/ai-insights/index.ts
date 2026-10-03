@@ -54,6 +54,7 @@ import {
   todayKey,
   TILESUGGEST_SYSTEM,
   MODEL,
+  FAST_MODEL,
 } from '../_shared/coach.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -168,15 +169,21 @@ Deno.serve(async (req) => {
   let prompt: string;
   let maxTokens: number;
   let tools: unknown[] | undefined;
+  // Nudge/reflection are short, formulaic, and never search — Haiku instead of Sonnet
+  // for a fraction of the cost with no meaningful quality loss. Every other kind stays
+  // on the default (MODEL, set inside callClaude).
+  let model: string = MODEL;
 
   if (kind === 'nudge') {
     system = NUDGE_SYSTEM;
     prompt = buildNudgePrompt(summarize(state!));
     maxTokens = 200;
+    model = FAST_MODEL;
   } else if (kind === 'reflection') {
     system = REFLECTION_SYSTEM;
     prompt = buildReflectionPrompt(summarizeForPeriod(state!, periodType));
     maxTokens = 500;
+    model = FAST_MODEL;
   } else if (kind === 'breakdown') {
     const tile = findTile(state!, body.tileId!);
     if (!tile) return json({ error: 'tile not found' }, 404, origin);
@@ -212,7 +219,7 @@ Deno.serve(async (req) => {
 
   let content: string;
   try {
-    content = await callClaude(ANTHROPIC_API_KEY, system, prompt, maxTokens, tools);
+    content = await callClaude(ANTHROPIC_API_KEY, system, prompt, maxTokens, tools, model);
   } catch (err) {
     console.error(err);
     return json({ error: 'coach unavailable' }, 502, origin);
@@ -238,7 +245,7 @@ Deno.serve(async (req) => {
 
   const { data: inserted, error: insErr } = await supabase
     .from('ai_insights')
-    .upsert({ user_id: userId, kind, period, content, model: MODEL }, { onConflict: 'user_id,kind,period' })
+    .upsert({ user_id: userId, kind, period, content, model }, { onConflict: 'user_id,kind,period' })
     .select()
     .single();
 

@@ -16,7 +16,7 @@
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
-import { AppStateShape, MODEL, NUDGE_SYSTEM, buildNudgePrompt, callClaude, corsHeaders, json, summarize, todayKey } from '../_shared/coach.ts';
+import { AppStateShape, FAST_MODEL, NUDGE_SYSTEM, buildNudgePrompt, callClaude, corsHeaders, json, summarize, todayKey } from '../_shared/coach.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -129,11 +129,13 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      const content = await callClaude(ANTHROPIC_API_KEY, NUDGE_SYSTEM, buildNudgePrompt(summarize(state)), 200);
+      // Same model as ai-insights' on-demand nudge path (FAST_MODEL) so the two never
+      // drift in cost or voice depending on which one happens to win the cache race.
+      const content = await callClaude(ANTHROPIC_API_KEY, NUDGE_SYSTEM, buildNudgePrompt(summarize(state)), 200, undefined, FAST_MODEL);
 
       await supabase
         .from('ai_insights')
-        .upsert({ user_id: row.user_id, kind: 'nudge', period: utcPeriod, content, model: MODEL }, { onConflict: 'user_id,kind,period' });
+        .upsert({ user_id: row.user_id, kind: 'nudge', period: utcPeriod, content, model: FAST_MODEL }, { onConflict: 'user_id,kind,period' });
 
       await sendExpoPush(row.expo_push_token!, content);
 

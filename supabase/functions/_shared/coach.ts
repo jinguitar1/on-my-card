@@ -4,6 +4,11 @@
 // notification body are always generated the exact same way.
 
 export const MODEL = 'claude-sonnet-5';
+/** Nudge/reflection are short, formulaic, and never use web search — Haiku handles them
+ *  at a fraction of Sonnet's cost with no meaningful quality loss. Reserved for exactly
+ *  those two kinds; breakdown/tilegen/tilesuggest stay on MODEL since they lean on
+ *  reasoning + search-result synthesis quality. */
+export const FAST_MODEL = 'claude-haiku-4-5-20251001';
 
 // Neither function is meant to be called from a browser — the mobile app's own fetch
 // calls aren't subject to CORS at all, and both endpoints authenticate via an
@@ -259,14 +264,17 @@ export function buildBreakdownPrompt(tile: Tile, userContext?: string): string {
 /** Anthropic's server-side web search tool — Claude decides when to search and
  *  Anthropic's own infrastructure executes it and feeds the results back within the
  *  same request; no client-side tool-execution loop needed. `max_uses` caps how many
- *  searches one breakdown can trigger, bounding cost/latency. */
-export const WEB_SEARCH_TOOL = { type: 'web_search_20250305', name: 'web_search', max_uses: 3 };
+ *  searches one breakdown can trigger, bounding cost/latency. Cut from 3 to 2 as a
+ *  deliberate cost-reduction pass (each search is billed on top of normal token cost) —
+ *  2 is still enough for Claude to verify/cross-check one search rather than going in
+ *  completely blind. */
+export const WEB_SEARCH_TOOL = { type: 'web_search_20250305', name: 'web_search', max_uses: 2 };
 
-/** A tighter search budget for tilegen specifically — each round-trip to Anthropic's
- *  search backend is a meaningful chunk of this call's latency, and generating 24-30
- *  tiles already takes a while on its own; capping at 2 instead of breakdown's 3 trims
- *  real wall-clock time with only a small research-depth tradeoff. */
-export const TILEGEN_WEB_SEARCH_TOOL = { type: 'web_search_20250305', name: 'web_search', max_uses: 2 };
+/** An even tighter search budget for tilegen/tilesuggest — each round-trip to
+ *  Anthropic's search backend is a meaningful chunk of both latency and cost, and
+ *  generating tile ideas tolerates a single well-chosen search better than a multi-step
+ *  research plan does. Cut from 2 to 1 in the same cost-reduction pass as above. */
+export const TILEGEN_WEB_SEARCH_TOOL = { type: 'web_search_20250305', name: 'web_search', max_uses: 1 };
 
 /** Calls Claude once. Throws on a non-2xx or an empty response — caller decides
  *  how to surface that (both callers here treat it as a clean 502). Optional `tools`
@@ -274,7 +282,14 @@ export const TILEGEN_WEB_SEARCH_TOOL = { type: 'web_search_20250305', name: 'web
  *  response content array can include search/tool-result blocks interleaved with text —
  *  every `text` block is concatenated in order rather than assuming a single block, so
  *  a tool-augmented response is handled the same way as a plain one. */
-export async function callClaude(apiKey: string, system: string, prompt: string, maxTokens: number, tools?: unknown[]): Promise<string> {
+export async function callClaude(
+  apiKey: string,
+  system: string,
+  prompt: string,
+  maxTokens: number,
+  tools?: unknown[],
+  model: string = MODEL
+): Promise<string> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -283,7 +298,7 @@ export async function callClaude(apiKey: string, system: string, prompt: string,
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: MODEL,
+      model,
       max_tokens: maxTokens,
       system,
       messages: [{ role: 'user', content: prompt }],

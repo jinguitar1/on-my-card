@@ -12,6 +12,16 @@ export const colors = {
   card: '#FFFFFF', // tile / sheet surfaces
   cardSunk: '#F4EEDD', // recessed / empty cell
 
+  // "Quiet" redesign tokens (Today screen, the Home dashboard, the Card grid) — additive,
+  // not a replacement: every token above stays exactly as it was so Settings/Rewards/
+  // SignIn/TileSheet/Onboarding keep rendering byte-identical. Only screens that
+  // explicitly reach for `paperQuiet`/`accentClay`/etc. pick up the calmer palette.
+  paperQuiet: '#FAFAF7', // a barely-there warm white, softer than `paper`
+  lineQuiet: '#E9E6DD', // hairline grid/border color for the quiet screens
+  inkQuietFaint: '#B5B2A8',
+  accentClay: '#C97B5F', // the one accent color the quiet screens allow themselves
+  accentClaySoft: '#F3E3DB', // a pale wash of accentClay, for the reskinned focus banner
+
   ink: '#1E1B16', // near-black, warm
   inkSoft: '#6B6357',
   inkFaint: '#A59C8C',
@@ -80,6 +90,15 @@ export const type = {
     letterSpacing: 1.5,
     textTransform: 'uppercase' as const,
   },
+
+  // "Quiet" redesign faces — Fraunces (a softer, less scrapbook-y serif than the Georgia
+  // `display`/`h1` above) for headlines, Manrope for everything else. Additive: existing
+  // `type.*` keys above are untouched, so anything not explicitly redesigned keeps Georgia.
+  quietDisplay: { fontFamily: 'Fraunces_600SemiBold', fontSize: 26, color: colors.ink, letterSpacing: -0.3 },
+  quietQuote: { fontFamily: 'Fraunces_500Medium_Italic', fontSize: 15, lineHeight: 23, color: colors.inkSoft },
+  quietLabel: { fontFamily: 'Manrope_800ExtraBold', fontSize: 13, color: colors.inkQuietFaint, letterSpacing: 0.2 },
+  quietBody: { fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink },
+  quietButton: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink },
 };
 
 export const shadow = {

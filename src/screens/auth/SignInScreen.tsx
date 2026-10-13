@@ -3,7 +3,7 @@ import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput,
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthContext';
-import { Card, DismissKeyboardView, GhostButton, PrimaryButton, Segmented } from '../../ui/components';
+import { Card, GhostButton, PrimaryButton, Segmented } from '../../ui/components';
 import { colors, space, type } from '../../ui/theme';
 
 type Step = 'email' | 'code' | 'setPassword' | 'forgot';
@@ -118,13 +118,13 @@ export default function SignInScreen({ navigation }: any) {
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.header}>
-          <Text style={type.display}>Sign in</Text>
+          <Text style={[type.quietDisplay, { fontSize: 26 }]}>Sign in</Text>
           <Pressable onPress={() => navigation.goBack()}>
             <Text style={styles.close}>Close</Text>
           </Pressable>
         </View>
 
-        <DismissKeyboardView style={styles.content}>
+        <View style={styles.content}>
           {step === 'email' && (
             <Card style={{ gap: space.md }}>
               <Text style={type.h2}>Back up this card</Text>
@@ -269,14 +269,14 @@ export default function SignInScreen({ navigation }: any) {
               {via !== 'recovery' && <GhostButton label="Skip" onPress={() => navigation.goBack()} disabled={busy} />}
             </Card>
           )}
-        </DismissKeyboardView>
+        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.paper },
+  safe: { flex: 1, backgroundColor: colors.paperQuiet },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -285,18 +285,20 @@ const styles = StyleSheet.create({
     paddingTop: space.md,
     marginBottom: space.lg,
   },
-  close: { color: colors.inkSoft, fontWeight: '700', fontSize: 14 },
+  close: { color: colors.inkQuietFaint, fontFamily: 'Manrope_700Bold', fontSize: 13 },
   content: { paddingHorizontal: space.lg },
-  hint: { ...type.tiny, lineHeight: 16 },
+  hint: { fontFamily: 'Manrope_500Medium', fontSize: 11, lineHeight: 16, color: colors.inkFaint },
   input: {
-    backgroundColor: colors.cardSunk,
+    backgroundColor: colors.card,
     borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.lineQuiet,
     paddingHorizontal: space.md,
     paddingVertical: 12,
     fontSize: 15,
-    fontWeight: '600',
+    fontFamily: 'Manrope_700Bold',
     color: colors.ink,
   },
-  codeInput: { textAlign: 'center', fontSize: 22, letterSpacing: 8, fontWeight: '800' },
+  codeInput: { textAlign: 'center', fontSize: 22, letterSpacing: 8, fontFamily: 'Manrope_800ExtraBold' },
   error: { color: colors.danger, fontSize: 13, fontWeight: '600' },
 });

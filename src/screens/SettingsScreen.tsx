@@ -246,7 +246,7 @@ export default function SettingsScreen({ navigation }: any) {
         keyboardShouldPersistTaps="handled"
         onScrollBeginDrag={Keyboard.dismiss}
       >
-        <Text style={type.display}>Settings</Text>
+        <Text style={[type.quietDisplay, { fontSize: 30 }]}>Settings</Text>
 
         <Text style={[styles.section, { marginTop: space.md }]}>Account</Text>
         <Card style={{ gap: space.sm }}>
@@ -560,13 +560,13 @@ function TimeSlots({
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.paper },
+  safe: { flex: 1, backgroundColor: colors.paperQuiet },
   content: { padding: space.lg, paddingBottom: space.xxl * 2 },
-  section: { ...type.kicker, marginTop: space.xl, marginBottom: space.sm },
+  section: { ...type.quietLabel, marginTop: space.xl, marginBottom: space.sm },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  rowLabel: { ...type.h2, fontSize: 15 },
-  hint: { ...type.tiny, lineHeight: 15, marginTop: 2 },
-  input: { backgroundColor: colors.cardSunk, borderRadius: 10, paddingHorizontal: space.md, paddingVertical: 10, fontSize: 15, fontWeight: '700', color: colors.ink },
+  rowLabel: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink },
+  hint: { fontFamily: 'Manrope_500Medium', fontSize: 11, lineHeight: 15, marginTop: 2, color: colors.inkFaint },
+  input: { backgroundColor: colors.card, borderRadius: 10, borderWidth: 1, borderColor: colors.lineQuiet, paddingHorizontal: space.md, paddingVertical: 10, fontSize: 15, fontFamily: 'Manrope_700Bold', color: colors.ink },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: { borderRadius: 999, borderWidth: 1.5, borderColor: colors.line, paddingVertical: 7, paddingHorizontal: 12, backgroundColor: colors.card },
   chipOn: { backgroundColor: colors.ink, borderColor: colors.ink },

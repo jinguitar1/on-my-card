@@ -6,7 +6,8 @@ import { type TileIdea } from '../domain/tileBank';
 import { CELL_COUNT, CENTER, GRID } from '../domain/types';
 import { Confetti } from '../feedback/Celebration';
 import { triumphHit } from '../feedback/haptics';
-import { CardTile, DismissKeyboardView, PrimaryButton, cardLayout } from '../ui/components';
+import { Companion } from '../ui/Companion';
+import { CardTile, PrimaryButton, cardLayout } from '../ui/components';
 import { colors, space, type } from '../ui/theme';
 
 /** The finished-card reveal moment — the swiped-through tiles stamp in with confetti,
@@ -39,7 +40,7 @@ export function CardReveal({
   return (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <DismissKeyboardView>
+      <View style={{ flex: 1 }}>
       <View style={styles.revealWrap}>
         <Text style={styles.revealHeadline}>Your card is ready.</Text>
         <View style={[styles.gridWrap, { width: gridW, height: gridW }]}>
@@ -62,7 +63,17 @@ export function CardReveal({
             );
           })}
         </View>
-        <Confetti trigger={1} intensity="full" accent={colors.stampGold} />
+        <Confetti trigger={1} intensity="full" accent={colors.accentClay} />
+
+        {/* Introduced right here, not on first open of Today — the card's actual birth
+            moment is the natural place to meet it, so Today isn't a stranger's screen the
+            first time it's seen. Every new card starts at stage 0, always — no Card object
+            exists yet to derive a real stage from, and a brand-new card has 0 bingos by
+            definition regardless. */}
+        <View style={styles.companionRow}>
+          <Companion stage={0} size={56} />
+          <Text style={styles.companionLine}>Say hello — it'll grow as you cross tiles off.</Text>
+        </View>
 
         <Text style={styles.nameLabel}>Name your card</Text>
         <TextInput
@@ -78,29 +89,40 @@ export function CardReveal({
       <View style={styles.footer}>
         <PrimaryButton label={ctaLabel} onPress={() => onSave(title)} disabled={!title.trim()} style={{ flex: 1 }} />
       </View>
-      </DismissKeyboardView>
+      </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.paper },
+  safe: { flex: 1, backgroundColor: colors.paperQuiet },
   footer: { padding: space.lg, flexDirection: 'row' },
   revealWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space.lg },
-  revealHeadline: { ...type.display, textAlign: 'center', marginBottom: space.xl },
+  revealHeadline: { ...type.quietDisplay, fontSize: 28, textAlign: 'center', marginBottom: space.xl },
   gridWrap: { position: 'relative' },
-  nameLabel: { ...type.kicker, marginTop: space.xl, marginBottom: space.xs },
+  companionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    alignSelf: 'stretch',
+    marginTop: space.xl,
+    backgroundColor: colors.accentClaySoft,
+    borderRadius: 14,
+    padding: space.sm,
+  },
+  companionLine: { ...type.quietQuote, flex: 1, fontSize: 13, lineHeight: 18 },
+  nameLabel: { ...type.quietLabel, marginTop: space.lg, marginBottom: space.xs },
   nameInput: {
     alignSelf: 'stretch',
     backgroundColor: colors.card,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.lineQuiet,
     paddingHorizontal: space.md,
     paddingVertical: 10,
     fontSize: 17,
-    fontWeight: '700',
+    fontFamily: 'Manrope_700Bold',
     color: colors.ink,
     textAlign: 'center',
   },

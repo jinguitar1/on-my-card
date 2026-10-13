@@ -1,43 +1,8 @@
-import { useEffect, useRef, type ReactNode } from 'react';
-import {
-  Animated,
-  Easing,
-  Keyboard,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  type StyleProp,
-  type ViewStyle,
-} from 'react-native';
+import { useEffect, useRef } from 'react';
+import { Animated, Easing, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { GRID } from '../domain/types';
 import { colors, radius, shadow, space, type } from './theme';
-
-// --- keyboard dismissal -------------------------------------------------
-
-/** Wrap a screen's content in this so tapping anywhere that isn't itself an input or a
- *  button dismisses the keyboard — plain Views have no touch handler at all, so without
- *  this a tap on empty space does nothing and a focused TextInput (and the keyboard
- *  covering the screen) just stays put.
- *
- *  Do NOT wrap a ScrollView (or anything containing one) with this — confirmed in
- *  practice, not just theoretical: it silently ate the scroll gesture entirely on
- *  SettingsScreen, because this Pressable's own responder negotiation can win out over
- *  the ScrollView's internal one depending on what's nested inside. For a scrollable
- *  screen, put `onScrollBeginDrag={Keyboard.dismiss}` directly on the ScrollView instead
- *  — dismiss-on-scroll rather than tap-anywhere, which doesn't touch the responder chain
- *  at all and is the standard mobile pattern for this anyway (Mail, Messages, etc.).
- *  This component is only for screens with no ScrollView at all (e.g. SignInScreen) and
- *  SwipeDeckScreen was already excluded for a related reason: its own hand-rolled
- *  PanResponder drag gesture (the swipe cards) risks the same kind of responder conflict. */
-export function DismissKeyboardView({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
-  return (
-    <Pressable style={[{ flex: 1 }, style]} onPress={Keyboard.dismiss} accessible={false}>
-      {children}
-    </Pressable>
-  );
-}
 
 // --- buttons ----------------------------------------------------------
 
@@ -51,10 +16,13 @@ export function PrimaryButton({
   label: string;
   onPress: () => void;
   disabled?: boolean;
-  tone?: 'ink' | 'gold' | 'danger';
+  tone?: 'ink' | 'gold' | 'danger' | 'clay';
   style?: StyleProp<ViewStyle>;
 }) {
-  const bg = tone === 'gold' ? colors.stampGold : tone === 'danger' ? colors.danger : colors.ink;
+  // 'clay' is the quiet redesign's one accent (src/ui/theme.ts's accentClay) — additive,
+  // not a replacement for 'gold', so any screen not yet redesigned keeps rendering exactly
+  // as it did.
+  const bg = tone === 'gold' ? colors.stampGold : tone === 'danger' ? colors.danger : tone === 'clay' ? colors.accentClay : colors.ink;
   const fg = tone === 'gold' ? colors.goldInk : '#fff';
   return (
     <Pressable
@@ -254,6 +222,11 @@ export interface CardTileProps {
    *  one persistent way to spot the focused tile once the tunnel-vision dimming itself
    *  has been dismissed. */
   isFocused?: boolean;
+  /** Opt-in hairline border instead of the gold one, for the "quiet" redesign
+   *  (CardDetailScreen only) — never the default, so CardReveal/onboarding's own
+   *  CardTile usage is untouched. Only affects an uncrossed tile's border; the crossed
+   *  "alive vs dead" treatment is unchanged regardless, since that's a settled decision. */
+  quiet?: boolean;
   onPress?: () => void;
   onLongPress?: () => void;
 }
@@ -267,6 +240,7 @@ export function CardTile({
   oneAwayColor,
   stampKey = 0,
   isFocused,
+  quiet,
   onPress,
   onLongPress,
 }: CardTileProps) {
@@ -306,8 +280,10 @@ export function CardTile({
     );
   }
 
-  const borderColor = glow.interpolate({ inputRange: [0, 1], outputRange: [colors.stampGold, oneAwayColor ?? colors.stampGold] });
-  const borderWidth = glow.interpolate({ inputRange: [0, 1], outputRange: [1.5, 3] });
+  const baseBorderColor = quiet ? colors.lineQuiet : colors.stampGold;
+  const baseBorderWidth = quiet ? 1 : 1.5;
+  const borderColor = glow.interpolate({ inputRange: [0, 1], outputRange: [baseBorderColor, oneAwayColor ?? baseBorderColor] });
+  const borderWidth = glow.interpolate({ inputRange: [0, 1], outputRange: [baseBorderWidth, 3] });
   const ribbonSize = Math.max(11, Math.round(size * 0.22));
 
   return (

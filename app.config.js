@@ -43,7 +43,7 @@ module.exports = {
     web: {
       favicon: './assets/favicon.png',
     },
-    plugins: ['expo-audio', 'expo-asset', '@react-native-community/datetimepicker', 'expo-secure-store'],
+    plugins: ['expo-audio', 'expo-asset', '@react-native-community/datetimepicker', 'expo-secure-store', 'expo-font'],
     extra: {
       eas: {
         projectId: 'b27dcd6c-97f5-485c-8442-a450f1cbe67a',

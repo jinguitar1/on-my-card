@@ -115,17 +115,17 @@ function ShapeBurst() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.paper },
+  safe: { flex: 1, backgroundColor: colors.paperQuiet },
   welcomeWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.xl },
   introWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.xl },
-  introKicker: { ...type.kicker, marginBottom: space.md },
-  introHeadline: { ...type.display, fontSize: 28, textAlign: 'center', lineHeight: 34, marginBottom: space.xl },
+  introKicker: { ...type.quietLabel, marginBottom: space.md },
+  introHeadline: { ...type.quietDisplay, fontSize: 26, textAlign: 'center', lineHeight: 32, marginBottom: space.xl },
   introDemoRow: { flexDirection: 'row', gap: space.xxl, marginBottom: space.xl },
   introDemoCol: { alignItems: 'center', gap: space.xs },
-  introDemoLabel: { ...type.label },
-  introSub: { ...type.body, color: colors.inkSoft, textAlign: 'center', fontSize: 15, lineHeight: 22 },
+  introDemoLabel: { fontFamily: 'Manrope_700Bold', fontSize: 12, color: colors.inkSoft },
+  introSub: { fontFamily: 'Manrope_500Medium', fontSize: 15, color: colors.inkSoft, textAlign: 'center', lineHeight: 22 },
   burst: { width: 260, height: 260, marginBottom: space.xl },
-  welcomeHeadline: { ...type.display, fontSize: 34, textAlign: 'center', lineHeight: 40 },
-  welcomeSub: { ...type.body, color: colors.inkSoft, textAlign: 'center', marginTop: space.md, fontSize: 16 },
+  welcomeHeadline: { ...type.quietDisplay, fontSize: 30, textAlign: 'center', lineHeight: 36 },
+  welcomeSub: { fontFamily: 'Manrope_500Medium', fontSize: 16, color: colors.inkSoft, textAlign: 'center', marginTop: space.md },
   footer: { padding: space.lg, flexDirection: 'row' },
 });

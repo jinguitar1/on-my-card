@@ -102,6 +102,17 @@ export const type = {
   // tightening a more neutral serif might.
   quietDisplay: { fontFamily: 'Fraunces_600SemiBold', fontSize: 26, color: colors.ink },
   quietQuote: { fontFamily: 'Fraunces_500Medium_Italic', fontSize: 15, lineHeight: 23, color: colors.inkSoft },
+  // A card's own *name* ("Jin's 2026 Card"), specifically, uses this instead of
+  // `quietDisplay` — reported twice as looking "squiggly"/"pixelated" on real letters
+  // like "J", which held up even after removing quietDisplay's negative letterSpacing.
+  // That points to Fraunces' own letterforms (a deliberately expressive, swash-heavy
+  // display serif by design) rather than a rendering bug — the fix is a different,
+  // plainer face for this one specific use, not another tweak to the same one. Manrope
+  // is already loaded and used everywhere else in the quiet palette, so this is a
+  // substitution, not a new font dependency. Screen headers ("Home", "Settings", "Sign
+  // in", "Your card is ready.") keep `quietDisplay` — only a card's own typed name
+  // switches.
+  quietCardTitle: { fontFamily: 'Manrope_800ExtraBold', color: colors.ink },
   quietLabel: { fontFamily: 'Manrope_800ExtraBold', fontSize: 13, color: colors.inkQuietFaint, letterSpacing: 0.2 },
   quietBody: { fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink },
   quietButton: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink },

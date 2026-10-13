@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { colors, radius, space } from './theme';
 
@@ -13,22 +13,24 @@ import { colors, radius, space } from './theme';
  *  dimmed by the one still-mounted underneath — a second dim would double-darken it. The
  *  backdrop stays tappable-to-dismiss either way, just transparent when `dim` is false. */
 export function SheetShell({ children, onClose, dim = true }: { children: ReactNode; onClose: () => void; dim?: boolean }) {
+  // Explicit pixel sizing via `useWindowDimensions()`, not `flex: 1` + percentages, for
+  // both `root` and `sheet` — a prior fix (flattening a redundant auto-height wrapper)
+  // addressed one real cause of this sheet rendering blank on-device, but it persisted
+  // after that fix shipped, which means `flex: 1` resolving a *definite* height from a
+  // `transparentModal`'s own native container isn't something to keep assuming here at
+  // all. Window dimensions sidestep the question entirely: `root` gets a real, known
+  // pixel height no matter how react-native-screens sizes the transparent modal's
+  // content view, and `sheet`'s `maxHeight` is computed from that same real number
+  // rather than a `'85%'` string needing a resolved parent to mean anything.
+  const { height: screenHeight } = useWindowDimensions();
+
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, { height: screenHeight }]}>
       <Pressable style={[styles.backdrop, dim && styles.backdropDim]} onPress={onClose} />
-      {/* The sheet itself IS the KeyboardAvoidingView (not a plain View wrapping one with
-          its own `flex: 1`) — that extra nesting is what broke this on-device: `sheet`'s
-          height was only ever bounded by `maxHeight`, a content-driven ("auto") size, so
-          a `flex: 1` child demanding "fill 100% of my parent" inside it was circular —
-          Yoga (native) resolves that ambiguity by collapsing the child to zero height,
-          while a browser's flexbox engine (the only place this was ever tested) is more
-          forgiving about it and renders fine anyway. The result on a real phone: the dim
-          backdrop painted correctly, but the sheet's content silently rendered at zero
-          height — "a gray screen pops up and nothing else shows up." Putting `maxHeight`
-          directly on the KeyboardAvoidingView removes the extra auto-height parent, so
-          the ScrollView's own `flex: 1` below has an unambiguous, resolved height to
-          fill instead of a circular one. */}
-      <KeyboardAvoidingView style={styles.sheet} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView
+        style={[styles.sheet, { maxHeight: screenHeight * 0.85 }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={styles.content}
@@ -43,11 +45,10 @@ export function SheetShell({ children, onClose, dim = true }: { children: ReactN
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, justifyContent: 'flex-end' },
+  root: { justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFill },
   backdropDim: { backgroundColor: 'rgba(30, 27, 22, 0.45)' },
   sheet: {
-    maxHeight: '85%',
     backgroundColor: colors.paperQuiet,
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,

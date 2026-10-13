@@ -22,11 +22,19 @@ export function CardReveal({
   defaultTitle,
   ctaLabel,
   onSave,
+  onAddMore,
 }: {
   kept: TileIdea[];
   defaultTitle: string;
   ctaLabel: string;
   onSave: (title: string) => void;
+  /** Lets a card finished with fewer than 24 tiles go back and add more before saving —
+   *  only CreateCardScreen passes this (it just flips its own phase back to 'deck',
+   *  resuming exactly where it left off since the deck screens already seed from
+   *  `draft.kept`); omitted here, every empty "+" cell stays the inert placeholder it
+   *  always was. Onboarding's own call site doesn't pass it, since its deck always
+   *  either fills all 24 or runs the bank dry trying. */
+  onAddMore?: () => void;
 }) {
   const { width } = useWindowDimensions();
   const gridW = Math.min(width - space.lg * 2, 420);
@@ -68,7 +76,12 @@ export function CardReveal({
             const idea = kept[cell < CENTER ? cell : cell - 1];
             return (
               <View key={cell} style={stylePos}>
-                <CardTile size={layout.cell} label={idea?.label ?? '＋'} emoji={idea?.emoji} />
+                <CardTile
+                  size={layout.cell}
+                  label={idea?.label ?? '＋'}
+                  emoji={idea?.emoji}
+                  onPress={!idea && onAddMore ? onAddMore : undefined}
+                />
               </View>
             );
           })}
@@ -86,8 +99,11 @@ export function CardReveal({
         </View>
 
         <Text style={styles.nameLabel}>Name your card</Text>
+        {/* `defaultValue`, not `value` — avoids the iOS-dictation duplicate-text bug a
+            controlled TextInput causes; `onChangeText` still keeps `title` in sync for
+            the Save button's disabled check and for what actually gets saved. */}
         <TextInput
-          value={title}
+          defaultValue={title}
           onChangeText={setTitle}
           placeholder="Name your card"
           placeholderTextColor={colors.inkFaint}

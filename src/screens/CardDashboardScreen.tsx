@@ -139,37 +139,38 @@ function DraftRow({ draft, onOpen, onDiscard }: { draft: DraftCard; onOpen: () =
     );
   }
 
-  if (swipeProgress > 0) {
-    // Styled like a finished card's own row (same emoji circle, same title, same
-    // arrow) rather than the dashed "add card" placeholder it used to share — so a
-    // saved-and-returned-to-later draft reads as "this is clearly one of my cards,
-    // just not done yet," not as a totally different, lesser kind of thing. The dim
-    // `opacity` on the whole row (no real blur filter available cross-platform without
-    // a native dependency this app otherwise avoids) is the "clearly a draft" cue, plus
-    // an explicit DRAFT badge under the title so it's never ambiguous at a glance.
-    return (
-      <>
-        <Pressable style={[styles.row, styles.draftRow]} onPress={onOpen}>
-          <View style={[styles.rowEmoji, styles.draftRowEmoji]}>
-            <Text style={styles.rowEmojiText}>{DEFAULT_CARD_EMOJI}</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.rowTitle} numberOfLines={2}>
-              {name}
-            </Text>
-            <Text style={styles.draftBadge}>Draft · {keptCount}/24 Kept</Text>
-          </View>
-          <Text style={styles.rowArrow}>→</Text>
-        </Pressable>
-        {discardLink}
-      </>
-    );
-  }
-
-  // A draft with nothing in it yet (e.g. the intent screen was opened and closed
-  // immediately) — shouldn't normally persist, but render nothing rather than a
-  // confusing empty-looking row if it ever does.
-  return null;
+  // Styled like a finished card's own row (same emoji circle, same title, same arrow)
+  // rather than the dashed "add card" placeholder it used to share — so a
+  // saved-and-returned-to-later draft reads as "this is clearly one of my cards, just
+  // not done yet," not as a totally different, lesser kind of thing. The dim `opacity`
+  // on the whole row (no real blur filter available cross-platform without a native
+  // dependency this app otherwise avoids) is the "clearly a draft" cue, plus an explicit
+  // DRAFT badge under the title so it's never ambiguous at a glance.
+  //
+  // This used to require `swipeProgress > 0` and render nothing at all for a draft with
+  // zero tiles kept so far — meaning naming a brand-new card and tapping "Save & finish
+  // later" before adding a single tile looked exactly like it hadn't saved anything: the
+  // draft genuinely was persisted (saveDraftCard fires on mount, before any tile is
+  // added), there was just no visible row for it anywhere. Any draft that reaches this
+  // point (not generating, no ready AI pool, no error) is resumable regardless of
+  // progress, so it always gets a row now.
+  return (
+    <>
+      <Pressable style={[styles.row, styles.draftRow]} onPress={onOpen}>
+        <View style={[styles.rowEmoji, styles.draftRowEmoji]}>
+          <Text style={styles.rowEmojiText}>{DEFAULT_CARD_EMOJI}</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rowTitle} numberOfLines={2}>
+            {name}
+          </Text>
+          <Text style={styles.draftBadge}>Draft · {keptCount}/24 Kept</Text>
+        </View>
+        <Text style={styles.rowArrow}>→</Text>
+      </Pressable>
+      {discardLink}
+    </>
+  );
 }
 
 const styles = StyleSheet.create({

@@ -202,7 +202,7 @@ export default function CreateCardScreen({ navigation, route }: any) {
             </Pressable>
           </View>
           <View style={styles.intentContent}>
-            <Text style={[type.quietDisplay, { fontSize: 24 }]}>Still researching "{draft?.title || 'your card'}"…</Text>
+            <Text style={[type.quietCardTitle, { fontSize: 24 }]}>Still researching "{draft?.title || 'your card'}"…</Text>
             <Text style={styles.intentHint}>
               This can take a minute or two. Feel free to close this and browse your other cards, we'll let you know
               the moment it's ready.
@@ -234,9 +234,16 @@ export default function CreateCardScreen({ navigation, route }: any) {
               keyboardShouldPersistTaps="handled"
               onScrollBeginDrag={Keyboard.dismiss}
             >
-              <Text style={[type.quietDisplay, { fontSize: 24 }]}>{title.trim() || 'New Card'}</Text>
+              <Text style={[type.quietCardTitle, { fontSize: 24 }]}>{title.trim() || 'New Card'}</Text>
+              {/* `defaultValue`, not `value` — a fully controlled TextInput (`value={title}`)
+                  is the known pattern behind iOS dictation duplicating text: the dictation
+                  engine writes directly into the native text field, and a controlled input
+                  forces the (momentarily stale) JS `title` back onto it on the next
+                  re-render, so the engine's own committed transcript lands on top of text
+                  that's already there instead of replacing it. `onChangeText` still keeps
+                  `title` in sync for the live headline preview above and for saving. */}
               <TextInput
-                value={title}
+                defaultValue={title}
                 onChangeText={setTitle}
                 placeholder="Name This Card"
                 placeholderTextColor={colors.inkFaint}
@@ -303,8 +310,11 @@ export default function CreateCardScreen({ navigation, route }: any) {
           <Pressable onPress={closeDeck} hitSlop={12}>
             <Text style={styles.closeText}>← Back</Text>
           </Pressable>
+          {/* `defaultValue`, not `value` — see the matching note on the intent-phase title
+              field above; the same dictation-duplication risk applies to any controlled
+              TextInput a user might voice-type into. */}
           <TextInput
-            value={title}
+            defaultValue={title}
             onChangeText={setTitle}
             onBlur={commitDeckTitle}
             placeholder="Name This Card"
@@ -360,6 +370,15 @@ export default function CreateCardScreen({ navigation, route }: any) {
       kept={kept}
       defaultTitle={title.trim() || `My ${new Date().getFullYear()} Card`}
       ctaLabel="Add to my cards"
+      // Lands back on the deck phase with this exact `kept` array already saved as the
+      // draft (not relying on the deck screens' own onProgress effect to have already
+      // caught up by the time 'deck' re-renders) — CuratedBrowseScreen/CustomDeckScreen
+      // both read their `initialKept` straight from `draft.kept`, so this is what makes
+      // resuming pick back up with every tile already on the card still showing as kept.
+      onAddMore={() => {
+        saveDraftCard(draftId, kept, [], false, { title: title.trim(), ...(source === 'custom' ? { source: 'custom' } : {}) });
+        setPhase('deck');
+      }}
       onSave={(title) => {
         createCard(
           kept.map((t) => ({ label: t.label, emoji: t.emoji, note: t.note, category: t.category, bankId: t.id })),

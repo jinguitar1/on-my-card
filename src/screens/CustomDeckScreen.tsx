@@ -1,13 +1,21 @@
 import { useEffect, useState } from 'react';
 import { Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CAPACITY } from '../domain/types';
 import { uid } from '../domain/logic';
 import { type TileIdea } from '../domain/tileBank';
 import { stampHit } from '../feedback/haptics';
 import { useSound } from '../feedback/sound';
-import { GhostButton, PrimaryButton, ProgressBar } from '../ui/components';
+import { PrimaryButton, ProgressBar } from '../ui/components';
 import { colors, radius, space } from '../ui/theme';
+
+// CreateCardScreen's own `deckHeader` row (back link + title field + save-later link)
+// sits above this component as a sibling, not as part of it — its real height isn't
+// knowable from here, so this is a reasonable fixed estimate added on top of the safe
+// area inset for `keyboardVerticalOffset` below, the same fix that resolved the
+// identical "button hidden behind the keyboard" issue on the intent screen's own header.
+const PARENT_HEADER_HEIGHT = 56;
 
 /** The "Customized" path in CreateCardScreen — type your own tiles one at a time instead
  *  of swiping through either the curated bank or an AI-researched deck. There's nothing
@@ -54,9 +62,14 @@ export default function CustomDeckScreen({
   const removeTile = (id: string) => setKept((k) => k.filter((t) => t.id !== id));
 
   const progressPct = Math.min(100, (kept.length / CAPACITY) * 100);
+  const insets = useSafeAreaInsets();
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={insets.top + PARENT_HEADER_HEIGHT}
+    >
       <View style={styles.progressRow}>
         <ProgressBar pct={progressPct} color={colors.accentClay} height={6} />
         <Text style={styles.progressHint}>
@@ -64,6 +77,13 @@ export default function CustomDeckScreen({
         </Text>
       </View>
 
+      {/* The add-tile form and both buttons used to live in a separate, fixed-at-the-
+          bottom `addBox` sibling, outside this ScrollView — fine when everything fit, but
+          with the keyboard up (taking roughly a third of the screen) plus a multi-line
+          note, that fixed section could run taller than the space actually left above the
+          keyboard, with nowhere for the overflow to go and no way to scroll down to reach
+          "Finish With N Tiles". Folding it into the same scrollable content as the kept
+          list means the worst case is now "scroll a bit," never "permanently hidden." */}
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={styles.list}
@@ -82,34 +102,46 @@ export default function CustomDeckScreen({
             </Pressable>
           </View>
         ))}
-      </ScrollView>
 
-      <View style={styles.addBox}>
-        <TextInput
-          value={label}
-          onChangeText={setLabel}
-          placeholder="What Do You Want To Do?"
-          placeholderTextColor={colors.inkFaint}
-          style={styles.input}
-          returnKeyType="done"
-        />
-        <TextInput
-          value={note}
-          onChangeText={setNote}
-          placeholder="Add A Note (Optional)"
-          placeholderTextColor={colors.inkFaint}
-          style={[styles.input, styles.noteInput]}
-          multiline
-        />
-        <PrimaryButton label="+ Add Tile" tone="clay" onPress={addTile} disabled={!label.trim()} style={{ marginTop: space.sm }} />
-        {kept.length > 0 && (
-          <GhostButton
-            label={`Finish With ${kept.length} Tile${kept.length === 1 ? '' : 's'}`}
-            onPress={() => onDone(kept)}
-            style={{ marginTop: space.xs }}
+        <View style={styles.addBox}>
+          {/* `defaultValue` (not `value`) avoids the iOS-dictation duplicate-text bug a
+              fully controlled TextInput causes — the trade-off is that these inputs can no
+              longer be cleared programmatically by changing `label`/`note` state alone. The
+              `key` tied to `kept.length` is the fix for that: it changes exactly once per
+              successful add, forcing React to remount a fresh, empty instance right as
+              `label`/`note` are reset to '', rather than leaving stale dictated text in the
+              same native text field. */}
+          <TextInput
+            key={`label-${kept.length}`}
+            defaultValue={label}
+            onChangeText={setLabel}
+            placeholder="What Do You Want To Do?"
+            placeholderTextColor={colors.inkFaint}
+            style={styles.input}
+            returnKeyType="done"
           />
-        )}
-      </View>
+          <TextInput
+            key={`note-${kept.length}`}
+            defaultValue={note}
+            onChangeText={setNote}
+            placeholder="Add A Note (Optional)"
+            placeholderTextColor={colors.inkFaint}
+            style={[styles.input, styles.noteInput]}
+            multiline
+          />
+          <PrimaryButton label="+ Add Tile" tone="clay" onPress={addTile} disabled={!label.trim()} style={{ marginTop: space.sm }} />
+          {/* A solid PrimaryButton, not a plain-text GhostButton, matching the same
+              "heighten it, make it more visible" fix applied to Curated's own finish
+              button — the two paths should look and feel the same at this step. */}
+          {kept.length > 0 && (
+            <PrimaryButton
+              label={`Finish With ${kept.length} Tile${kept.length === 1 ? '' : 's'}`}
+              onPress={() => onDone(kept)}
+              style={{ marginTop: space.xs, paddingVertical: 18 }}
+            />
+          )}
+        </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }

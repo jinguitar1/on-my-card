@@ -96,12 +96,17 @@ export default function TileEditScreen({ route, navigation }: any) {
         </Pressable>
       </View>
 
+      {/* `defaultValue`, not `value`, throughout this screen — avoids the iOS-dictation
+          duplicate-text bug a controlled TextInput causes. Safe everywhere it's used here
+          since every field that needs to reset after a save/cancel (the step-add and
+          step-edit forms below) is itself behind a conditional mount, so toggling it off
+          and back on already gives a fresh instance with no stale text to clear. */}
       <Text style={styles.sectionLabel}>LABEL</Text>
-      <TextInput value={label} onChangeText={setLabel} style={styles.input} placeholder="Tile label" placeholderTextColor={colors.inkFaint} />
+      <TextInput defaultValue={label} onChangeText={setLabel} style={styles.input} placeholder="Tile label" placeholderTextColor={colors.inkFaint} />
 
       <Text style={[styles.sectionLabel, { marginTop: space.md }]}>NOTE</Text>
       <TextInput
-        value={note}
+        defaultValue={note}
         onChangeText={setNote}
         style={[styles.input, styles.noteInput]}
         placeholder="Add a note (optional)"
@@ -154,14 +159,14 @@ export default function TileEditScreen({ route, navigation }: any) {
                 {isEditing ? (
                   <View style={{ gap: space.xs }}>
                     <TextInput
-                      value={editTitle}
+                      defaultValue={editTitle}
                       onChangeText={setEditTitle}
                       style={styles.stepEditInput}
                       placeholder="Step title"
                       placeholderTextColor={colors.inkFaint}
                     />
                     <TextInput
-                      value={editDetail}
+                      defaultValue={editDetail}
                       onChangeText={setEditDetail}
                       style={[styles.stepEditInput, styles.stepEditDetailInput]}
                       placeholder="Detail (optional)"
@@ -193,7 +198,7 @@ export default function TileEditScreen({ route, navigation }: any) {
         {addingStep && (
           <View style={styles.addStepBox}>
             <TextInput
-              value={newTitle}
+              defaultValue={newTitle}
               onChangeText={setNewTitle}
               style={styles.stepEditInput}
               placeholder="Step title"
@@ -201,7 +206,7 @@ export default function TileEditScreen({ route, navigation }: any) {
               autoFocus
             />
             <TextInput
-              value={newDetail}
+              defaultValue={newDetail}
               onChangeText={setNewDetail}
               style={[styles.stepEditInput, styles.stepEditDetailInput]}
               placeholder="Detail (optional)"

@@ -46,6 +46,9 @@ export default function CardDetailScreen({ route, navigation }: any) {
   // appeared, meaning its onPress (the one that actually calls deleteCard) never fired.
   // `ConfirmDialog` (built on `Modal`, which *is* implemented on web) replaces it.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // Same reasoning as delete above — a confirm step first, since shuffling is easy to
+  // tap by accident and not something to undo casually once it's scrambled the grid.
+  const [confirmingShuffle, setConfirmingShuffle] = useState(false);
   const gridAnim = useRef(new Animated.Value(0)).current;
 
   const gridW = Math.min(width - space.lg * 2, 460);
@@ -98,8 +101,11 @@ export default function CardDetailScreen({ route, navigation }: any) {
 
         <View style={styles.titleRow}>
           {editingTitle ? (
+            // `defaultValue`, not `value` — avoids the iOS-dictation duplicate-text bug a
+            // controlled TextInput causes; safe since this whole field is behind
+            // `editingTitle` and remounts fresh each time editing starts.
             <TextInput
-              value={titleDraft}
+              defaultValue={titleDraft}
               onChangeText={setTitleDraft}
               onBlur={() => {
                 setEditingTitle(false);
@@ -107,7 +113,7 @@ export default function CardDetailScreen({ route, navigation }: any) {
               }}
               autoFocus
               selectTextOnFocus
-              style={[type.quietDisplay, { fontSize: 30 }, styles.titleInput]}
+              style={[type.quietCardTitle, { fontSize: 30 }, styles.titleInput]}
             />
           ) : (
             <Pressable
@@ -117,7 +123,7 @@ export default function CardDetailScreen({ route, navigation }: any) {
               }}
               style={{ flex: 1 }}
             >
-              <Text style={[type.quietDisplay, { fontSize: 30 }]}>{card.title}</Text>
+              <Text style={[type.quietCardTitle, { fontSize: 30 }]}>{card.title}</Text>
             </Pressable>
           )}
         </View>
@@ -201,12 +207,6 @@ export default function CardDetailScreen({ route, navigation }: any) {
           })}
         </Animated.View>
 
-        {/* The only rearrange option — no drag gesture exists on the grid itself, so this
-            is a full reshuffle of every filled tile's position rather than moving one at
-            a time. Tap as many times as wanted; each press is an independent fresh
-            shuffle (shuffleCard), not a toggle. */}
-        <GhostButton label="🔀 Shuffle Tiles" onPress={() => shuffleCard(cardId)} style={{ marginBottom: space.md }} />
-
         {FEATURES.aiCoach &&
           (showCoach ? (
             <>
@@ -251,10 +251,32 @@ export default function CardDetailScreen({ route, navigation }: any) {
           </>
         )}
 
-        <Pressable style={styles.deleteCard} onPress={() => setConfirmingDelete(true)}>
-          <Text style={styles.deleteCardText}>🗑️ Delete this card</Text>
-        </Pressable>
+        {/* Shuffle moved down here, next to Delete — both are "a user could tap this by
+            accident and not want the result" actions, so they're grouped and tucked below
+            the everyday content (coach/stats) instead of sitting right under the grid
+            where a stray tap is far more likely. Still has its own clear label and a
+            confirm step, so it's tucked away without being hard to find. */}
+        <View style={styles.dangerZone}>
+          <Pressable style={styles.shuffleCard} onPress={() => setConfirmingShuffle(true)}>
+            <Text style={styles.shuffleCardText}>🔀 Shuffle tiles</Text>
+          </Pressable>
+          <Pressable style={styles.deleteCard} onPress={() => setConfirmingDelete(true)}>
+            <Text style={styles.deleteCardText}>🗑️ Delete this card</Text>
+          </Pressable>
+        </View>
       </ScrollView>
+
+      <ConfirmDialog
+        visible={confirmingShuffle}
+        title="Shuffle this card's tiles?"
+        message="Every filled square moves to a new spot on the grid. Nothing is added, removed, or crossed off — you can shuffle again as many times as you like."
+        confirmLabel="Shuffle"
+        onConfirm={() => {
+          setConfirmingShuffle(false);
+          shuffleCard(cardId);
+        }}
+        onCancel={() => setConfirmingShuffle(false)}
+      />
 
       <ConfirmDialog
         visible={confirmingDelete}
@@ -389,13 +411,18 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
     elevation: 10,
   },
-  deleteCard: {
+  dangerZone: {
     alignSelf: 'stretch',
-    alignItems: 'center',
     marginTop: space.xxl,
-    paddingVertical: space.md,
+    paddingTop: space.md,
     borderTopWidth: 1,
     borderTopColor: colors.line,
+  },
+  shuffleCard: { alignSelf: 'center', paddingVertical: space.sm },
+  shuffleCardText: { ...type.label, color: colors.inkFaint },
+  deleteCard: {
+    alignSelf: 'center',
+    paddingVertical: space.sm,
   },
   deleteCardText: { ...type.label, color: colors.danger },
 });

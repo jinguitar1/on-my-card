@@ -68,8 +68,10 @@ export function SuggestionPicker({
   if (mode === 'custom') {
     return (
       <View>
+        {/* `defaultValue`, not `value` — avoids the iOS-dictation duplicate-text bug a
+            controlled TextInput causes. */}
         <TextInput
-          value={typedLabel}
+          defaultValue={typedLabel}
           onChangeText={setTypedLabel}
           placeholder="Type It Here"
           placeholderTextColor={colors.inkFaint}

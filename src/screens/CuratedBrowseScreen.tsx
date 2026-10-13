@@ -5,7 +5,7 @@ import { suggestionsByCategory, type TileIdea } from '../domain/tileBank';
 import { CAPACITY, CATEGORY_LABELS } from '../domain/types';
 import { lightTap, stampHit } from '../feedback/haptics';
 import { useSound } from '../feedback/sound';
-import { GhostButton, ProgressBar } from '../ui/components';
+import { PrimaryButton, ProgressBar } from '../ui/components';
 import { categoryColor, colors, radius, space } from '../ui/theme';
 
 /** The "Curated ideas" path in CreateCardScreen — replaces the old swipe-left/skip,
@@ -88,9 +88,17 @@ export default function CuratedBrowseScreen({
         ))}
       </ScrollView>
 
+      {/* A solid, heightened PrimaryButton now, not a plain-text GhostButton — the finish
+          action used to read as easy to miss (no fill, no real height) sitting right at
+          the bottom of the screen. */}
       {kept.length > 0 && (
         <View style={styles.footer}>
-          <GhostButton label={`Finish With ${kept.length} Tile${kept.length === 1 ? '' : 's'}`} onPress={() => onDone(kept)} />
+          <PrimaryButton
+            label={`Finish With ${kept.length} Tile${kept.length === 1 ? '' : 's'}`}
+            tone="clay"
+            onPress={() => onDone(kept)}
+            style={styles.finishBtn}
+          />
         </View>
       )}
     </View>
@@ -125,4 +133,5 @@ const styles = StyleSheet.create({
   itemAction: { fontFamily: 'Manrope_700Bold', fontSize: 12, color: colors.inkQuietFaint },
   itemActionAdded: { color: colors.accentClay },
   footer: { padding: space.lg, borderTopWidth: 1, borderTopColor: colors.lineQuiet, backgroundColor: colors.paperQuiet },
+  finishBtn: { paddingVertical: 18 },
 });

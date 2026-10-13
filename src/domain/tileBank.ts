@@ -161,3 +161,14 @@ export function buildDeck(exclude: Set<string> = new Set()): TileIdea[] {
 export function randomSuggestions(exclude: Set<string>, n: number): TileIdea[] {
   return shuffle(TILE_BANK.filter((t) => !exclude.has(t.id))).slice(0, n);
 }
+
+/** Every remaining (not-yet-used) idea, grouped by category — the "browse everything"
+ *  view in SuggestionPicker, as opposed to `randomSuggestions`'s small sample. Stable
+ *  bank order within each group (not shuffled) since this is meant to be scanned
+ *  predictably, not sampled; empty categories (every idea in them already used) are
+ *  dropped rather than rendered as an empty section. */
+export function suggestionsByCategory(exclude: Set<string>): { category: TileCategory; items: TileIdea[] }[] {
+  return (Object.keys(RAW) as TileCategory[])
+    .map((category) => ({ category, items: TILE_BANK.filter((t) => t.category === category && !exclude.has(t.id)) }))
+    .filter((group) => group.items.length > 0);
+}

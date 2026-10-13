@@ -3,19 +3,23 @@ import { useState } from 'react';
 import { Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { FEATURES } from '../config/features';
 import { uid } from '../domain/logic';
 import { type TileIdea } from '../domain/tileBank';
 import { supabase } from '../lib/supabaseClient';
 import { getPermission } from '../notifications/scheduler';
 import { useApp } from '../state/AppStateContext';
 import { CardReveal } from './CardReveal';
+import CuratedBrowseScreen from './CuratedBrowseScreen';
+import CustomDeckScreen from './CustomDeckScreen';
 import SwipeDeckScreen from './SwipeDeckScreen';
 import { PrimaryButton, Segmented } from '../ui/components';
 import { colors, space, type } from '../ui/theme';
 
 type Phase = 'intent' | 'deck' | 'reveal';
-type Source = 'bank' | 'ai';
+/** 'ai' stays in the union (never offered in the Segmented control below) only so a
+ *  draft already persisted with that source from before AI research was replaced by
+ *  "Customized" still type-checks when resumed — see DraftCard.source in domain/types.ts. */
+type Source = 'bank' | 'ai' | 'custom';
 
 interface TilegenResult {
   tiles: { emoji: string; label: string; note: string }[];
@@ -36,12 +40,17 @@ interface TilegenResult {
  *  background is always safe, which a single shared "current draft" slot could not
  *  guarantee (see DraftCard's own comment for why this is a list).
  *
- *  Behind FEATURES.aiCardGen: an "intent" phase before the deck lets the user either
- *  keep the original curated-bank flow (default, unchanged) or describe what this card
- *  is for and have a `tilegen` Edge Function call (see supabase/functions/ai-insights)
- *  research it and generate a deck instead — fed into the exact same SwipeDeckScreen via
- *  its `customDeck` prop, so nothing downstream of the deck needed to change. With the
- *  flag off, this screen behaves identically to before (straight to the deck). */
+ *  An "intent" phase before the deck lets the user name the card and choose how to fill
+ *  it: the curated bank (default, swipe through pre-written ideas) or "Customized" (type
+ *  every tile in by hand via CustomDeckScreen). This phase always shows now — neither
+ *  option needs AI, so there's no feature flag gating it.
+ *
+ *  AI-researched decks (`source: 'ai'`, a `tilegen` Edge Function call — see
+ *  supabase/functions/ai-insights) are no longer offered as a choice here (AI features
+ *  are on hold for v1), but the generation code (`startGenerate`/`pollForResult`) is left
+ *  intact below rather than deleted, and any draft/card from before this change that
+ *  already has a generated `pool` still resumes and swipes through it exactly as before —
+ *  only the *entry point* for starting a new one was removed. */
 export default function CreateCardScreen({ navigation, route }: any) {
   const { state, createCard, saveDraftCard, clearDraftCard } = useApp();
   const [draftId] = useState<string>(() => route.params?.draftId ?? uid('draft'));
@@ -51,7 +60,7 @@ export default function CreateCardScreen({ navigation, route }: any) {
   const hasReadyPool = !isGenerating && !!draft?.pool?.length;
   const resuming = hasSwipeProgress || hasReadyPool;
 
-  const [phase, setPhase] = useState<Phase>(() => (resuming ? 'deck' : FEATURES.aiCardGen ? 'intent' : 'deck'));
+  const [phase, setPhase] = useState<Phase>(() => (resuming ? 'deck' : 'intent'));
   const [kept, setKept] = useState<TileIdea[]>([]);
 
   const [title, setTitle] = useState(draft?.title ?? '');
@@ -163,24 +172,14 @@ export default function CreateCardScreen({ navigation, route }: any) {
     );
   }
 
-  // Nothing kept or rejected yet means there's no real progress to protect — close
-  // immediately rather than asking about a draft that would just be empty anyway.
+  // Every swipe already re-saves the draft via onProgress, so there's never anything to
+  // lose by just leaving — no confirm dialog needed. This used to ask "save or discard?"
+  // on every exit; now the header button's own label ("Save & finish later" once there's
+  // real progress) already says what's about to happen, which is the confirmation.
+  // Discarding a paused draft is still available, just from the dashboard's own
+  // "Discard this draft" link on the draft row, not re-litigated on every close here.
   const closeDeck = () => {
-    const keptCount = draft?.kept.length ?? 0;
-    const rejectedCount = draft?.rejected.length ?? 0;
-    if (keptCount + rejectedCount === 0) {
-      navigation.goBack();
-      return;
-    }
-    Alert.alert(
-      'Save as draft?',
-      `You've kept ${keptCount} tile${keptCount === 1 ? '' : 's'} so far. Save this as a draft to pick up later, or discard it?`,
-      [
-        { text: 'Keep editing', style: 'cancel' },
-        { text: 'Discard', style: 'destructive', onPress: () => { clearDraftCard(draftId); navigation.goBack(); } },
-        { text: 'Save draft', onPress: () => navigation.goBack() },
-      ]
-    );
+    navigation.goBack();
   };
 
   if (phase === 'intent') {
@@ -196,7 +195,7 @@ export default function CreateCardScreen({ navigation, route }: any) {
             </Pressable>
           </View>
           <View style={styles.intentContent}>
-            <Text style={type.h1}>Still researching "{draft?.title || 'your card'}"…</Text>
+            <Text style={[type.quietDisplay, { fontSize: 24 }]}>Still researching "{draft?.title || 'your card'}"…</Text>
             <Text style={styles.intentHint}>
               This can take a minute or two. Feel free to close this and browse your other cards — we'll let you know
               the moment it's ready.
@@ -220,7 +219,7 @@ export default function CreateCardScreen({ navigation, route }: any) {
               keyboardShouldPersistTaps="handled"
               onScrollBeginDrag={Keyboard.dismiss}
             >
-              <Text style={type.h1}>{title.trim() || 'New card'}</Text>
+              <Text style={[type.quietDisplay, { fontSize: 24 }]}>{title.trim() || 'New card'}</Text>
               <TextInput
                 value={title}
                 onChangeText={setTitle}
@@ -232,7 +231,7 @@ export default function CreateCardScreen({ navigation, route }: any) {
               <Segmented
                 options={[
                   { value: 'bank', label: 'Curated ideas' },
-                  { value: 'ai', label: '🔍 Research this' },
+                  { value: 'custom', label: '✍️ Customized' },
                 ]}
                 value={source}
                 onChange={(v) => {
@@ -240,21 +239,8 @@ export default function CreateCardScreen({ navigation, route }: any) {
                   setGenError(null);
                 }}
               />
-              {source === 'ai' && (
-                <>
-                  <Text style={styles.intentHint}>
-                    What's this card for? A trip, an event, a goal — the more specific, the better the ideas.
-                  </Text>
-                  <TextInput
-                    value={intentText}
-                    onChangeText={setIntentText}
-                    placeholder="Describe what this card is for..."
-                    placeholderTextColor={colors.inkFaint}
-                    style={styles.intentInput}
-                    multiline
-                  />
-                  {genError && <Text style={styles.error}>{genError}</Text>}
-                </>
+              {source === 'custom' && (
+                <Text style={styles.intentHint}>Type each tile in yourself — add as many as you like, aim for 24.</Text>
               )}
             </ScrollView>
             {/* Deliberately outside the ScrollView, not pinned via marginTop:'auto' inside
@@ -264,7 +250,8 @@ export default function CreateCardScreen({ navigation, route }: any) {
                 scrollable region can't be pushed off-screen the same way. */}
             <View style={styles.intentFooter}>
               <PrimaryButton
-                label={source === 'ai' ? 'Generate deck' : 'Start swiping'}
+                label={source === 'ai' ? 'Generate deck' : source === 'custom' ? 'Start typing' : 'Browse ideas'}
+                tone="clay"
                 onPress={() => (source === 'ai' ? startGenerate() : setPhase('deck'))}
                 disabled={source === 'ai' && !intentText.trim()}
               />
@@ -275,27 +262,70 @@ export default function CreateCardScreen({ navigation, route }: any) {
     );
   }
 
+  // The card's name and the "save & finish later" exit both need to stay reachable for
+  // as long as the deck phase is up — not just before it starts — since the user may
+  // not have settled on a name yet, or may only realize partway through 24 tiles that
+  // they need to step away. Committed on blur, same convention CardDetailScreen's own
+  // tap-to-edit title already uses, rather than saving on every keystroke.
+  const commitDeckTitle = () => {
+    saveDraftCard(draftId, draft?.kept ?? [], draft?.rejected ?? [], draft?.usedSecondPass ?? false, {
+      title: title.trim(),
+      ...(pool ? { pool, intent: intentText.trim(), source: 'ai' } : source === 'custom' ? { source: 'custom' } : {}),
+    });
+  };
+
   if (phase === 'deck') {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <View style={styles.header}>
-          <Pressable onPress={closeDeck} hitSlop={12}>
-            <Text style={styles.closeText}>Close</Text>
+        <View style={styles.deckHeader}>
+          <TextInput
+            value={title}
+            onChangeText={setTitle}
+            onBlur={commitDeckTitle}
+            placeholder="Name this card"
+            placeholderTextColor={colors.inkFaint}
+            style={styles.deckTitleInput}
+          />
+          {/* Always visible, not conditional on there being progress yet — every swipe/tile
+              already autosaves, so this is always a true, safe thing to tap. */}
+          <Pressable onPress={closeDeck} hitSlop={12} style={styles.deckSaveLink}>
+            <Text style={styles.closeText}>💾 Save & finish later</Text>
           </Pressable>
         </View>
-        <SwipeDeckScreen
-          customDeck={pool}
-          initialKept={draft?.kept}
-          initialRejected={draft?.rejected}
-          initialUsedSecondPass={draft?.usedSecondPass}
-          onProgress={(k, r, u) =>
-            saveDraftCard(draftId, k, r, u, pool ? { title: title.trim(), pool, intent: intentText.trim(), source: 'ai' } : { title: title.trim() })
-          }
-          onDone={(result) => {
-            setKept(result);
-            setPhase('reveal');
-          }}
-        />
+        {source === 'custom' ? (
+          <CustomDeckScreen
+            initialKept={draft?.kept}
+            onProgress={(k) => saveDraftCard(draftId, k, [], false, { title: title.trim(), source: 'custom' })}
+            onDone={(result) => {
+              setKept(result);
+              setPhase('reveal');
+            }}
+          />
+        ) : pool ? (
+          // A legacy already-researched AI pool from before that option was removed from
+          // the Segmented control above — still swipeable exactly as before, so an old
+          // in-progress draft doesn't break. Unreachable for any card started now.
+          <SwipeDeckScreen
+            customDeck={pool}
+            initialKept={draft?.kept}
+            initialRejected={draft?.rejected}
+            initialUsedSecondPass={draft?.usedSecondPass}
+            onProgress={(k, r, u) => saveDraftCard(draftId, k, r, u, { title: title.trim(), pool, intent: intentText.trim(), source: 'ai' })}
+            onDone={(result) => {
+              setKept(result);
+              setPhase('reveal');
+            }}
+          />
+        ) : (
+          <CuratedBrowseScreen
+            initialKept={draft?.kept}
+            onProgress={(k) => saveDraftCard(draftId, k, [], false, { title: title.trim() })}
+            onDone={(result) => {
+              setKept(result);
+              setPhase('reveal');
+            }}
+          />
+        )}
       </SafeAreaView>
     );
   }
@@ -320,26 +350,46 @@ export default function CreateCardScreen({ navigation, route }: any) {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.paper },
+  safe: { flex: 1, backgroundColor: colors.paperQuiet },
   header: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: space.lg, paddingTop: space.md },
-  closeText: { ...type.label, color: colors.inkSoft },
+  closeText: { fontFamily: 'Manrope_700Bold', fontSize: 13, color: colors.inkQuietFaint },
+  deckHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingHorizontal: space.lg,
+    paddingTop: space.md,
+  },
+  deckTitleInput: {
+    flex: 1,
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 15,
+    color: colors.ink,
+    paddingVertical: 6,
+  },
+  deckSaveLink: { flexShrink: 0 },
   intentContent: { paddingHorizontal: space.lg, paddingTop: space.lg, gap: space.lg },
-  intentHint: { ...type.body, color: colors.inkSoft },
+  intentHint: { fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.inkSoft },
   titleInput: {
-    backgroundColor: colors.cardSunk,
+    backgroundColor: colors.card,
     borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.lineQuiet,
     paddingHorizontal: space.md,
     paddingVertical: 12,
     fontSize: 16,
-    fontWeight: '700',
+    fontFamily: 'Manrope_700Bold',
     color: colors.ink,
   },
   intentInput: {
-    backgroundColor: colors.cardSunk,
+    backgroundColor: colors.card,
     borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.lineQuiet,
     paddingHorizontal: space.md,
     paddingVertical: 12,
     fontSize: 15,
+    fontFamily: 'Manrope_500Medium',
     color: colors.ink,
     minHeight: 100,
     textAlignVertical: 'top',

@@ -1,20 +1,9 @@
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Line, Polygon, Text as SvgText } from 'react-native-svg';
 
-import { CATEGORY_ACCENTS, type TileCategory } from '../domain/types';
+import { CATEGORY_ACCENTS, CATEGORY_LABELS, type TileCategory } from '../domain/types';
 import type { CategoryStat } from '../domain/logic';
 import { colors, space, type } from './theme';
-
-const CATEGORY_LABELS: Record<TileCategory, string> = {
-  comfort: 'Comfort',
-  adventure: 'Adventure',
-  creative: 'Creative',
-  health: 'Health',
-  career: 'Career',
-  kindness: 'Kindness',
-  fun: 'Fun',
-  mindful: 'Mindful',
-};
 
 const RINGS = 4;
 const SIZE = 290;

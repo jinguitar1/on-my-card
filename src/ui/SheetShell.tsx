@@ -13,15 +13,25 @@ import { colors, radius, space } from './theme';
  *  dimmed by the one still-mounted underneath — a second dim would double-darken it. The
  *  backdrop stays tappable-to-dismiss either way, just transparent when `dim` is false. */
 export function SheetShell({ children, onClose, dim = true }: { children: ReactNode; onClose: () => void; dim?: boolean }) {
-  // Explicit pixel sizing via `useWindowDimensions()`, not `flex: 1` + percentages, for
-  // both `root` and `sheet` — a prior fix (flattening a redundant auto-height wrapper)
-  // addressed one real cause of this sheet rendering blank on-device, but it persisted
-  // after that fix shipped, which means `flex: 1` resolving a *definite* height from a
-  // `transparentModal`'s own native container isn't something to keep assuming here at
-  // all. Window dimensions sidestep the question entirely: `root` gets a real, known
-  // pixel height no matter how react-native-screens sizes the transparent modal's
-  // content view, and `sheet`'s `maxHeight` is computed from that same real number
-  // rather than a `'85%'` string needing a resolved parent to mean anything.
+  // Explicit pixel sizing via `useWindowDimensions()` for `root`, so it always gets a
+  // real, known full-screen height no matter how react-native-screens sizes a
+  // `transparentModal`'s content view.
+  //
+  // `sheet` itself was the actual, still-unfixed bug through two prior attempts at this:
+  // it only ever had a `maxHeight` (a *cap* on content-driven sizing), never a `height`
+  // or `flex`. That's fine on its own — a `maxHeight`-only View is supposed to shrink-
+  // wrap its content, up to that cap. But its child, the ScrollView below, had its own
+  // `flex: 1`, meaning "fill 100% of my parent's height" — and the parent's height was
+  // *itself* defined as "whatever my content needs." That's the same circular
+  // flex-in-an-auto-height-parent ambiguity the very first fix here addressed in a
+  // *different* pair of views, reappearing one level deeper in this exact pair, which
+  // is why removing that outer wrapper (and later, switching the cap from a `'85%'`
+  // string to a literal pixel number) never actually resolved it — neither change
+  // touched the real circular dependency. The fix is to stop asking the ScrollView to
+  // fill a height that doesn't exist yet: no `flex: 1` here, so it sizes to its own
+  // content first, which `sheet`'s `maxHeight` (plus `overflow: 'hidden'`) then clips
+  // and makes scrollable, the same way `maxHeight`-capped scrollable panels are meant to
+  // work.
   const { height: screenHeight } = useWindowDimensions();
 
   return (
@@ -31,12 +41,7 @@ export function SheetShell({ children, onClose, dim = true }: { children: ReactN
         style={[styles.sheet, { maxHeight: screenHeight * 0.85 }]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-          onScrollBeginDrag={Keyboard.dismiss}
-        >
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" onScrollBeginDrag={Keyboard.dismiss}>
           {children}
         </ScrollView>
       </KeyboardAvoidingView>

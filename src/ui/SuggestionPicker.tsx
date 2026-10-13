@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { collapseDictationDuplicate } from '../domain/dictation';
 import { suggestionsByCategory } from '../domain/tileBank';
 import { CATEGORY_LABELS, type TileCategory } from '../domain/types';
 import { GhostButton, PrimaryButton } from './components';
@@ -72,7 +73,7 @@ export function SuggestionPicker({
             controlled TextInput causes. */}
         <TextInput
           defaultValue={typedLabel}
-          onChangeText={setTypedLabel}
+          onChangeText={(t) => setTypedLabel(collapseDictationDuplicate(t))}
           placeholder="Type It Here"
           placeholderTextColor={colors.inkFaint}
           style={styles.input}

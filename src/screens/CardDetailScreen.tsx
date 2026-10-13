@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useInsight } from '../ai/useInsight';
 import { FEATURES } from '../config/features';
+import { collapseDictationDuplicate } from '../domain/dictation';
 import { cardSummary, isCardComplete, isTileCrossed, nearMissLines, radarStats, tileAt } from '../domain/logic';
 import { CELL_COUNT, CENTER, GRID } from '../domain/types';
 import { Confetti } from '../feedback/Celebration';
@@ -106,7 +107,7 @@ export default function CardDetailScreen({ route, navigation }: any) {
             // `editingTitle` and remounts fresh each time editing starts.
             <TextInput
               defaultValue={titleDraft}
-              onChangeText={setTitleDraft}
+              onChangeText={(t) => setTitleDraft(collapseDictationDuplicate(t))}
               onBlur={() => {
                 setEditingTitle(false);
                 renameCard(cardId, titleDraft);

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { collapseDictationDuplicate } from '../domain/dictation';
 import { CAPACITY } from '../domain/types';
 import { uid } from '../domain/logic';
 import { type TileIdea } from '../domain/tileBank';
@@ -114,7 +115,7 @@ export default function CustomDeckScreen({
           <TextInput
             key={`label-${kept.length}`}
             defaultValue={label}
-            onChangeText={setLabel}
+            onChangeText={(t) => setLabel(collapseDictationDuplicate(t))}
             placeholder="What Do You Want To Do?"
             placeholderTextColor={colors.inkFaint}
             style={styles.input}
@@ -123,7 +124,7 @@ export default function CustomDeckScreen({
           <TextInput
             key={`note-${kept.length}`}
             defaultValue={note}
-            onChangeText={setNote}
+            onChangeText={(t) => setNote(collapseDictationDuplicate(t))}
             placeholder="Add A Note (Optional)"
             placeholderTextColor={colors.inkFaint}
             style={[styles.input, styles.noteInput]}

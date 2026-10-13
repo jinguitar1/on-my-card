@@ -139,13 +139,22 @@ function DraftRow({ draft, onOpen, onDiscard }: { draft: DraftCard; onOpen: () =
     );
   }
 
-  // Styled like a finished card's own row (same emoji circle, same title, same arrow)
-  // rather than the dashed "add card" placeholder it used to share — so a
-  // saved-and-returned-to-later draft reads as "this is clearly one of my cards, just
-  // not done yet," not as a totally different, lesser kind of thing. The dim `opacity`
-  // on the whole row (no real blur filter available cross-platform without a native
-  // dependency this app otherwise avoids) is the "clearly a draft" cue, plus an explicit
-  // DRAFT badge under the title so it's never ambiguous at a glance.
+  // Styled like a finished card's own row (same emoji circle, same title) rather than
+  // the dashed "add card" placeholder it used to share — so a saved-and-returned-to-
+  // later draft reads as "this is clearly one of my cards, just not done yet," not as a
+  // totally different, lesser kind of thing.
+  //
+  // That similarity turned out to be too close: confirmed from a screen recording, a
+  // real card ("Jin's curated ideas 2") and a near-empty draft ("Jin's customized ideas
+  // 2," 0/24 kept) sat in the same list looking close enough alike that tapping the
+  // draft (which correctly reopens card creation) read as "an unfinished real card is
+  // taking me to the wrong place" — it wasn't a routing bug, the draft just didn't look
+  // different enough from a real card to explain what it actually was. Now: a dashed
+  // (not solid) border in the accent color, same visual language the "+ Create a new
+  // card" placeholder already uses for "this isn't a finished thing yet," a loud
+  // pill-style "DRAFT" badge next to the title instead of small gray subtext underneath
+  // it, and a ↻ (resume) arrow instead of the real-card list's → (open) — three
+  // independent cues now, not one.
   //
   // This used to require `swipeProgress > 0` and render nothing at all for a draft with
   // zero tiles kept so far — meaning naming a brand-new card and tapping "Save & finish
@@ -161,12 +170,15 @@ function DraftRow({ draft, onOpen, onDiscard }: { draft: DraftCard; onOpen: () =
           <Text style={styles.rowEmojiText}>{DEFAULT_CARD_EMOJI}</Text>
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.rowTitle} numberOfLines={2}>
-            {name}
-          </Text>
-          <Text style={styles.draftBadge}>Draft · {keptCount}/24 Kept</Text>
+          <View style={styles.draftTitleRow}>
+            <Text style={styles.draftPill}>DRAFT</Text>
+            <Text style={styles.rowTitle} numberOfLines={1}>
+              {name}
+            </Text>
+          </View>
+          <Text style={styles.draftBadge}>{keptCount}/24 kept so far</Text>
         </View>
-        <Text style={styles.rowArrow}>→</Text>
+        <Text style={styles.draftResumeArrow}>↻</Text>
       </Pressable>
       {discardLink}
     </>
@@ -205,9 +217,22 @@ const styles = StyleSheet.create({
   rowEmojiText: { fontSize: 19 },
   rowTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.ink, flex: 1 },
   rowArrow: { fontSize: 16, fontWeight: '800', color: colors.inkQuietFaint },
-  draftRow: { marginTop: space.md, opacity: 0.55 },
+  draftRow: { marginTop: space.md, opacity: 0.7, borderStyle: 'dashed', borderColor: colors.accentClay },
   draftRowEmoji: { backgroundColor: colors.inkQuietFaint },
-  draftBadge: { fontFamily: 'Manrope_700Bold', fontSize: 11, color: colors.inkQuietFaint, marginTop: 2 },
+  draftTitleRow: { flexDirection: 'row', alignItems: 'center', gap: space.xs, flexWrap: 'wrap' },
+  draftPill: {
+    fontFamily: 'Manrope_800ExtraBold',
+    fontSize: 10,
+    letterSpacing: 0.5,
+    color: colors.accentClay,
+    backgroundColor: colors.accentClaySoft,
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    overflow: 'hidden',
+  },
+  draftBadge: { fontFamily: 'Manrope_500Medium', fontSize: 11, color: colors.inkQuietFaint, marginTop: 2 },
+  draftResumeArrow: { fontSize: 18, fontWeight: '800', color: colors.accentClay },
   addCard: {
     marginTop: space.lg,
     borderWidth: 1.5,

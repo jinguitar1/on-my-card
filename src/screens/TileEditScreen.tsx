@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { collapseDictationDuplicate } from '../domain/dictation';
 import { tileAt, uid } from '../domain/logic';
 import type { PlanStep } from '../domain/types';
 import { useApp } from '../state/AppStateContext';
@@ -102,12 +103,12 @@ export default function TileEditScreen({ route, navigation }: any) {
           step-edit forms below) is itself behind a conditional mount, so toggling it off
           and back on already gives a fresh instance with no stale text to clear. */}
       <Text style={styles.sectionLabel}>LABEL</Text>
-      <TextInput defaultValue={label} onChangeText={setLabel} style={styles.input} placeholder="Tile label" placeholderTextColor={colors.inkFaint} />
+      <TextInput defaultValue={label} onChangeText={(t) => setLabel(collapseDictationDuplicate(t))} style={styles.input} placeholder="Tile label" placeholderTextColor={colors.inkFaint} />
 
       <Text style={[styles.sectionLabel, { marginTop: space.md }]}>NOTE</Text>
       <TextInput
         defaultValue={note}
-        onChangeText={setNote}
+        onChangeText={(t) => setNote(collapseDictationDuplicate(t))}
         style={[styles.input, styles.noteInput]}
         placeholder="Add a note (optional)"
         placeholderTextColor={colors.inkFaint}
@@ -160,14 +161,14 @@ export default function TileEditScreen({ route, navigation }: any) {
                   <View style={{ gap: space.xs }}>
                     <TextInput
                       defaultValue={editTitle}
-                      onChangeText={setEditTitle}
+                      onChangeText={(t) => setEditTitle(collapseDictationDuplicate(t))}
                       style={styles.stepEditInput}
                       placeholder="Step title"
                       placeholderTextColor={colors.inkFaint}
                     />
                     <TextInput
                       defaultValue={editDetail}
-                      onChangeText={setEditDetail}
+                      onChangeText={(t) => setEditDetail(collapseDictationDuplicate(t))}
                       style={[styles.stepEditInput, styles.stepEditDetailInput]}
                       placeholder="Detail (optional)"
                       placeholderTextColor={colors.inkFaint}
@@ -199,7 +200,7 @@ export default function TileEditScreen({ route, navigation }: any) {
           <View style={styles.addStepBox}>
             <TextInput
               defaultValue={newTitle}
-              onChangeText={setNewTitle}
+              onChangeText={(t) => setNewTitle(collapseDictationDuplicate(t))}
               style={styles.stepEditInput}
               placeholder="Step title"
               placeholderTextColor={colors.inkFaint}
@@ -207,7 +208,7 @@ export default function TileEditScreen({ route, navigation }: any) {
             />
             <TextInput
               defaultValue={newDetail}
-              onChangeText={setNewDetail}
+              onChangeText={(t) => setNewDetail(collapseDictationDuplicate(t))}
               style={[styles.stepEditInput, styles.stepEditDetailInput]}
               placeholder="Detail (optional)"
               placeholderTextColor={colors.inkFaint}

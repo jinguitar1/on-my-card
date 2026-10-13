@@ -3,6 +3,7 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { type TileIdea } from '../domain/tileBank';
+import { collapseDictationDuplicate } from '../domain/dictation';
 import { CELL_COUNT, CENTER, GRID } from '../domain/types';
 import { Confetti } from '../feedback/Celebration';
 import { triumphHit } from '../feedback/haptics';
@@ -104,7 +105,7 @@ export function CardReveal({
             the Save button's disabled check and for what actually gets saved. */}
         <TextInput
           defaultValue={title}
-          onChangeText={setTitle}
+          onChangeText={(t) => setTitle(collapseDictationDuplicate(t))}
           placeholder="Name your card"
           placeholderTextColor={colors.inkFaint}
           style={styles.nameInput}

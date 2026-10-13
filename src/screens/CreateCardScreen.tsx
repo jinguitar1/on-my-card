@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { collapseDictationDuplicate } from '../domain/dictation';
 import { uid } from '../domain/logic';
 import { type TileIdea } from '../domain/tileBank';
 import { supabase } from '../lib/supabaseClient';
@@ -244,7 +245,7 @@ export default function CreateCardScreen({ navigation, route }: any) {
                   `title` in sync for the live headline preview above and for saving. */}
               <TextInput
                 defaultValue={title}
-                onChangeText={setTitle}
+                onChangeText={(t) => setTitle(collapseDictationDuplicate(t))}
                 placeholder="Name This Card"
                 placeholderTextColor={colors.inkFaint}
                 style={styles.titleInput}
@@ -315,7 +316,7 @@ export default function CreateCardScreen({ navigation, route }: any) {
               TextInput a user might voice-type into. */}
           <TextInput
             defaultValue={title}
-            onChangeText={setTitle}
+            onChangeText={(t) => setTitle(collapseDictationDuplicate(t))}
             onBlur={commitDeckTitle}
             placeholder="Name This Card"
             placeholderTextColor={colors.inkFaint}

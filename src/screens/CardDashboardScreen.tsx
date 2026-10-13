@@ -1,10 +1,12 @@
+import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../auth/AuthContext';
 import { type DraftCard } from '../domain/types';
 import { useApp } from '../state/AppStateContext';
-import { colors, goalColor, radius, shadow, space, type } from '../ui/theme';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { colors, goalColor, radius, space, type } from '../ui/theme';
 
 const DEFAULT_CARD_EMOJI = '🃏';
 
@@ -29,7 +31,7 @@ export default function CardDashboardScreen({ navigation }: any) {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={type.display}>Home</Text>
+        <Text style={[type.quietDisplay, { fontSize: 32 }]}>Home</Text>
 
         {showSyncBanner && (
           <Pressable style={styles.banner} onPress={() => navigation.navigate('SignIn')}>
@@ -46,7 +48,7 @@ export default function CardDashboardScreen({ navigation }: any) {
               <Pressable
                 key={card.id}
                 style={styles.row}
-                onPress={() => navigation.navigate('CardDetail', { cardId: card.id })}
+                onPress={() => navigation.navigate('Today', { cardId: card.id })}
               >
                 <View style={[styles.rowEmoji, { backgroundColor: goalColor(i) }]}>
                   <Text style={styles.rowEmojiText}>{card.emoji || DEFAULT_CARD_EMOJI}</Text>
@@ -84,6 +86,28 @@ function DraftRow({ draft, onOpen, onDiscard }: { draft: DraftCard; onOpen: () =
   const name = draft.title?.trim() || 'Untitled card';
   const keptCount = draft.kept.length;
   const swipeProgress = keptCount + draft.rejected.length;
+  // Confirmed before actually discarding — this used to fire immediately on tap, with
+  // no way back if it was an accidental press and real swipe/typing progress was lost.
+  const [confirming, setConfirming] = useState(false);
+  const discardLink = (
+    <>
+      <Pressable style={styles.discardDraft} onPress={() => setConfirming(true)}>
+        <Text style={styles.discardDraftText}>Discard this draft</Text>
+      </Pressable>
+      <ConfirmDialog
+        visible={confirming}
+        title="Discard this draft?"
+        message={`"${name}" and everything kept so far will be deleted. This can't be undone.`}
+        confirmLabel="Discard"
+        destructive
+        onConfirm={() => {
+          setConfirming(false);
+          onDiscard();
+        }}
+        onCancel={() => setConfirming(false)}
+      />
+    </>
+  );
 
   if (draft.generating) {
     return (
@@ -110,9 +134,7 @@ function DraftRow({ draft, onOpen, onDiscard }: { draft: DraftCard; onOpen: () =
         <Pressable style={[styles.addCard, styles.addCardError]} onPress={onOpen}>
           <Text style={[styles.addCardText, styles.addCardErrorText]}>⚠️ Couldn't research "{name}" — tap to try again</Text>
         </Pressable>
-        <Pressable style={styles.discardDraft} onPress={onDiscard}>
-          <Text style={styles.discardDraftText}>Discard this draft</Text>
-        </Pressable>
+        {discardLink}
       </>
     );
   }
@@ -125,9 +147,7 @@ function DraftRow({ draft, onOpen, onDiscard }: { draft: DraftCard; onOpen: () =
             ↻ Continue "{name}" ({keptCount}/24 kept)
           </Text>
         </Pressable>
-        <Pressable style={styles.discardDraft} onPress={onDiscard}>
-          <Text style={styles.discardDraftText}>Discard this draft</Text>
-        </Pressable>
+        {discardLink}
       </>
     );
   }
@@ -139,7 +159,7 @@ function DraftRow({ draft, onOpen, onDiscard }: { draft: DraftCard; onOpen: () =
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.paper },
+  safe: { flex: 1, backgroundColor: colors.paperQuiet },
   content: { padding: space.lg, paddingBottom: space.xxl * 2 },
   hint: { ...type.tiny, marginTop: space.lg },
   banner: {
@@ -147,42 +167,41 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     alignSelf: 'stretch',
-    backgroundColor: colors.goldSoft,
+    backgroundColor: colors.accentClaySoft,
     borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: space.md,
     marginTop: space.md,
   },
-  bannerText: { fontSize: 13, fontWeight: '700', color: colors.goldInk },
-  bannerArrow: { fontSize: 15, fontWeight: '800', color: colors.goldInk, paddingHorizontal: space.xs },
+  bannerText: { fontFamily: 'Manrope_700Bold', fontSize: 13, color: colors.accentClay },
+  bannerArrow: { fontSize: 15, fontWeight: '800', color: colors.accentClay, paddingHorizontal: space.xs },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.card,
-    borderRadius: radius.lg,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.line,
-    paddingVertical: space.lg,
-    paddingHorizontal: space.lg,
+    borderColor: colors.lineQuiet,
+    paddingVertical: space.md,
+    paddingHorizontal: space.md,
     gap: space.md,
-    ...shadow.card,
   },
-  rowEmoji: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
-  rowEmojiText: { fontSize: 26 },
-  rowTitle: { ...type.h1, fontSize: 20, flex: 1 },
-  rowArrow: { fontSize: 18, fontWeight: '800', color: colors.inkFaint },
+  rowEmoji: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  rowEmojiText: { fontSize: 19 },
+  rowTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.ink, flex: 1 },
+  rowArrow: { fontSize: 16, fontWeight: '800', color: colors.inkQuietFaint },
   addCard: {
     marginTop: space.lg,
     borderWidth: 1.5,
-    borderColor: colors.lineStrong,
+    borderColor: colors.lineQuiet,
     borderStyle: 'dashed',
     borderRadius: radius.lg,
     paddingVertical: space.lg,
     alignItems: 'center',
   },
-  addCardText: { ...type.label, color: colors.inkSoft },
-  addCardReady: { borderStyle: 'solid', borderColor: colors.stampGold, backgroundColor: colors.goldSoft },
-  addCardReadyText: { color: colors.goldInk },
+  addCardText: { fontFamily: 'Manrope_700Bold', fontSize: 13, color: colors.inkQuietFaint },
+  addCardReady: { borderStyle: 'solid', borderColor: colors.accentClay, backgroundColor: colors.accentClaySoft },
+  addCardReadyText: { color: colors.accentClay },
   addCardError: { borderStyle: 'solid', borderColor: colors.danger },
   addCardErrorText: { color: colors.danger },
   discardDraft: { marginTop: space.sm, alignItems: 'center' },

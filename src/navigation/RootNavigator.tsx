@@ -14,7 +14,9 @@ import OnboardingNavigator from '../screens/OnboardingNavigator';
 import RewardsScreen from '../screens/RewardsScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import SignInScreen from '../screens/auth/SignInScreen';
+import TileEditScreen from '../screens/TileEditScreen';
 import TileSheetScreen from '../screens/TileSheetScreen';
+import TodayScreen from '../screens/TodayScreen';
 import { colors } from '../ui/theme';
 
 const Tab = createBottomTabNavigator();
@@ -31,6 +33,7 @@ function CardStack() {
   return (
     <CardStackNav.Navigator screenOptions={{ headerShown: false }}>
       <CardStackNav.Screen name="CardDashboard" component={CardDashboardScreen} />
+      <CardStackNav.Screen name="Today" component={TodayScreen} />
       <CardStackNav.Screen name="CardDetail" component={CardDetailScreen} />
     </CardStackNav.Navigator>
   );
@@ -99,7 +102,19 @@ export default function RootNavigator() {
     <NavigationContainer>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Tabs" component={Tabs} />
-        <Stack.Screen name="TileSheet" component={TileSheetScreen} options={{ presentation: 'modal' }} />
+        {/* transparentModal (not the old opaque 'modal') keeps the grid mounted and
+            visible underneath — the whole point being that a tile's sheet should feel
+            like it's sitting on top of the card, not replacing it with a new page. */}
+        <Stack.Screen
+          name="TileSheet"
+          component={TileSheetScreen}
+          options={{ presentation: 'transparentModal', animation: 'slide_from_bottom' }}
+        />
+        <Stack.Screen
+          name="TileEdit"
+          component={TileEditScreen}
+          options={{ presentation: 'transparentModal', animation: 'slide_from_bottom' }}
+        />
         <Stack.Screen name="SignIn" component={SignInScreen} options={{ presentation: 'modal' }} />
         <Stack.Screen name="CreateCard" component={CreateCardScreen} options={{ presentation: 'modal' }} />
       </Stack.Navigator>

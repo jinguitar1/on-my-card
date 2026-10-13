@@ -22,6 +22,7 @@ import {
   type Card,
   type DraftCard,
   type DraftCardTile,
+  type PlanStep,
   type Reward,
   type Settings,
   type Tile,
@@ -59,7 +60,7 @@ interface AppApi {
     kept: DraftCardTile[],
     rejected: DraftCardTile[],
     usedSecondPass: boolean,
-    extra?: { title?: string; pool?: DraftCardTile[]; intent?: string; source?: 'bank' | 'ai'; generating?: boolean; genError?: string }
+    extra?: { title?: string; pool?: DraftCardTile[]; intent?: string; source?: 'bank' | 'ai' | 'custom'; generating?: boolean; genError?: string }
   ) => void;
   clearDraftCard: (draftId: string) => void;
 
@@ -68,6 +69,8 @@ interface AppApi {
   setTile: (cardId: string, cell: number, seed: TileSeed) => void;
   clearTile: (cardId: string, cell: number) => void;
   setFocusedTile: (cardId: string, tileId: string | null) => void;
+  updateTileContent: (cardId: string, cell: number, patch: { label?: string; note?: string }) => void;
+  setTilePlan: (cardId: string, cell: number, plan: PlanStep[]) => void;
 
   addReward: (cardId: string) => void;
   editReward: (cardId: string, rewardId: string, patch: Partial<Reward>) => void;
@@ -330,7 +333,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       kept: DraftCardTile[],
       rejected: DraftCardTile[],
       usedSecondPass: boolean,
-      extra?: { title?: string; pool?: DraftCardTile[]; intent?: string; source?: 'bank' | 'ai'; generating?: boolean; genError?: string }
+      extra?: { title?: string; pool?: DraftCardTile[]; intent?: string; source?: 'bank' | 'ai' | 'custom'; generating?: boolean; genError?: string }
     ) => {
       setState((st) => {
         const next: DraftCard = { id: draftId, kept, rejected, usedSecondPass, ...extra };
@@ -454,6 +457,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  /** A narrow patch for TileEditScreen's "Save changes" — deliberately NOT built on
+   *  `setTile`, which fully reconstructs a Tile from a TileSeed and would silently drop
+   *  any field not in that shape (doneAt, plan, ...). This spreads the existing tile
+   *  first so everything except label/note is preserved untouched. */
+  const updateTileContent = useCallback((cardId: string, cell: number, patch: { label?: string; note?: string }) => {
+    setState((st) => {
+      const stCard = st.cards.find((c) => c.id === cardId);
+      const existing = stCard?.tiles.find((t) => t.cell === cell);
+      if (!stCard || !existing) return st;
+      const tile: Tile = { ...existing, label: patch.label?.trim() || existing.label, note: patch.note };
+      const tiles = stCard.tiles.map((t) => (t.id === existing.id ? tile : t));
+      return { ...st, cards: st.cards.map((c) => (c.id === cardId ? { ...stCard, tiles } : c)) };
+    });
+  }, []);
+
+  /** Replaces a tile's whole plan — the caller (TileEditScreen) always passes the full
+   *  next array (add/edit/delete/toggle-done all compute the next array client-side and
+   *  hand it back whole), same convention `setTile` and friends already use. */
+  const setTilePlan = useCallback((cardId: string, cell: number, plan: PlanStep[]) => {
+    setState((st) => {
+      const stCard = st.cards.find((c) => c.id === cardId);
+      const existing = stCard?.tiles.find((t) => t.cell === cell);
+      if (!stCard || !existing) return st;
+      const tiles = stCard.tiles.map((t) => (t.id === existing.id ? { ...t, plan } : t));
+      return { ...st, cards: st.cards.map((c) => (c.id === cardId ? { ...stCard, tiles } : c)) };
+    });
+  }, []);
+
   // --- rewards ---
   const addReward = useCallback((cardId: string) => {
     setState((st) => {
@@ -524,6 +555,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setTile,
       clearTile,
       setFocusedTile,
+      updateTileContent,
+      setTilePlan,
       addReward,
       editReward,
       removeReward,
@@ -548,6 +581,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setTile,
       clearTile,
       setFocusedTile,
+      updateTileContent,
+      setTilePlan,
       addReward,
       editReward,
       removeReward,

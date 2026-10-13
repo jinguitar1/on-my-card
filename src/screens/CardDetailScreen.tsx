@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, Easing, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Animated, Easing, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useInsight } from '../ai/useInsight';
@@ -9,7 +9,8 @@ import { CELL_COUNT, CENTER, GRID } from '../domain/types';
 import { Confetti } from '../feedback/Celebration';
 import { triumphHit } from '../feedback/haptics';
 import { useApp } from '../state/AppStateContext';
-import { CardTile, GhostButton, Pill, cardLayout } from '../ui/components';
+import { CardTile, GhostButton, ProgressBar, cardLayout } from '../ui/components';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { colors, space, type } from '../ui/theme';
 import { RadarChart } from '../ui/RadarChart';
 
@@ -41,6 +42,12 @@ export default function CardDetailScreen({ route, navigation }: any) {
   const [showRadar, setShowRadar] = useState(false);
   const [showCoach, setShowCoach] = useState(false);
   const [confettiTrigger, setConfettiTrigger] = useState(0);
+  // `Alert.alert` used to drive this confirmation — it's a documented no-op on
+  // react-native-web (its whole implementation there is `static alert() {}`), so on web
+  // the "Delete" button looked broken: the confirmation it was waiting on never
+  // appeared, meaning its onPress (the one that actually calls deleteCard) never fired.
+  // `ConfirmDialog` (built on `Modal`, which *is* implemented on web) replaces it.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const gridAnim = useRef(new Animated.Value(0)).current;
 
   const gridW = Math.min(width - space.lg * 2, 460);
@@ -68,22 +75,16 @@ export default function CardDetailScreen({ route, navigation }: any) {
   const focusedTile = card.tiles.find((t) => t.id === card.focusedTileId);
   const nearMiss = new Map(nearMissLines(card).map((n) => [n.missingCell, colors.stampGold]));
 
-  const handleDelete = () => {
-    Alert.alert(
-      'Delete this card?',
-      `"${card.title}" and everything on it will be permanently deleted. This can't be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            deleteCard(cardId);
-            navigation.goBack();
-          },
-        },
-      ]
-    );
+  const confirmDelete = () => {
+    deleteCard(cardId);
+    setConfirmingDelete(false);
+    // Not goBack(): CardDetail now sits two levels deep (Dashboard -> Today ->
+    // CardDetail), so a single goBack() landed back on Today for the card that was
+    // *just* deleted — Today's own "card not found" guard then tried to goBack() a
+    // second time itself, and that double-pop is what was silently breaking the whole
+    // delete action. popToTop() returns to the dashboard directly, in one step,
+    // regardless of how deep the stack is.
+    navigation.popToTop();
   };
 
   return (
@@ -132,7 +133,7 @@ export default function CardDetailScreen({ route, navigation }: any) {
               }}
               autoFocus
               selectTextOnFocus
-              style={[type.display, styles.titleInput]}
+              style={[type.quietDisplay, { fontSize: 30 }, styles.titleInput]}
             />
           ) : (
             <Pressable
@@ -142,27 +143,42 @@ export default function CardDetailScreen({ route, navigation }: any) {
               }}
               style={{ flex: 1 }}
             >
-              <Text style={type.display}>{card.title}</Text>
+              <Text style={[type.quietDisplay, { fontSize: 30 }]}>{card.title}</Text>
             </Pressable>
           )}
         </View>
 
         {focusedTile && !bannerDismissed && (
-          <Pressable style={styles.focusBanner} onPress={() => setBannerDismissed(true)}>
+          // Not one big Pressable anymore — it used to double as the dismiss tap target
+          // for the whole row, which would have swallowed (native) or double-fired (web,
+          // where nested Pressables bubble like DOM clicks) a "View steps" button nested
+          // inside it. Three explicit zones instead: label (inert), steps, dismiss.
+          <View style={styles.focusBanner}>
             <View style={{ flex: 1 }}>
               <Text style={styles.focusBannerKicker}>FOCUS TILE</Text>
               <Text style={styles.focusBannerText} numberOfLines={1}>
                 {focusedTile.emoji} {focusedTile.label}
               </Text>
             </View>
-            <Text style={styles.focusBannerExit}>✕</Text>
-          </Pressable>
+            <Pressable
+              onPress={() => navigation.navigate('TileEdit', { cardId, cell: focusedTile.cell })}
+              hitSlop={8}
+              style={styles.focusBannerSteps}
+            >
+              <Text style={styles.focusBannerStepsText}>View steps →</Text>
+            </Pressable>
+            <Pressable onPress={() => setBannerDismissed(true)} hitSlop={8}>
+              <Text style={styles.focusBannerExit}>✕</Text>
+            </Pressable>
+          </View>
         )}
 
-        <View style={styles.statRow}>
-          <Pill text={`${summary.bingos} bingo${summary.bingos === 1 ? '' : 's'}`} tone="ink" />
-          <Pill text={`${summary.crossed}/${summary.total} crossed`} tone="neutral" />
-          {complete && <Pill text="🏆 Complete" tone="success" />}
+        <View style={styles.statLine}>
+          <ProgressBar pct={summary.total > 0 ? (summary.crossed / summary.total) * 100 : 0} color={colors.accentClay} height={5} />
+          <Text style={styles.statLineText}>
+            {summary.crossed}/{summary.total} crossed · {summary.bingos} bingo{summary.bingos === 1 ? '' : 's'}
+            {complete ? ' · 🏆 Complete' : ''}
+          </Text>
         </View>
 
         <Animated.View
@@ -199,6 +215,7 @@ export default function CardDetailScreen({ route, navigation }: any) {
                 <CardTile
                   size={layout.cell}
                   isFocused={focused}
+                  quiet
                   label={tile?.label ?? '＋'}
                   emoji={tile?.emoji}
                   crossed={crossed}
@@ -254,10 +271,20 @@ export default function CardDetailScreen({ route, navigation }: any) {
           </>
         )}
 
-        <Pressable style={styles.deleteCard} onPress={handleDelete}>
+        <Pressable style={styles.deleteCard} onPress={() => setConfirmingDelete(true)}>
           <Text style={styles.deleteCardText}>🗑️ Delete this card</Text>
         </Pressable>
       </ScrollView>
+
+      <ConfirmDialog
+        visible={confirmingDelete}
+        title="Delete this card?"
+        message={`"${card.title}" and everything on it will be permanently deleted. This can't be undone.`}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={confirmDelete}
+        onCancel={() => setConfirmingDelete(false)}
+      />
 
       <Confetti trigger={confettiTrigger} intensity="burst" accent={colors.stampGold} />
     </SafeAreaView>
@@ -295,7 +322,7 @@ function CoachTriggerButton({ onPress, ready }: { onPress: () => void; ready: bo
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.paper },
+  safe: { flex: 1, backgroundColor: colors.paperQuiet },
   content: { padding: space.lg, paddingBottom: space.xxl * 2, alignItems: 'center' },
   backLink: { alignSelf: 'flex-start', marginBottom: space.sm },
   backLinkText: { ...type.label, color: colors.inkSoft },
@@ -350,24 +377,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     alignSelf: 'stretch',
-    backgroundColor: colors.stampGold,
+    backgroundColor: colors.accentClaySoft,
     borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: space.md,
     marginTop: space.sm,
   },
-  focusBannerKicker: { ...type.kicker, fontSize: 10, color: colors.crossInk, opacity: 0.7, marginBottom: 1 },
-  focusBannerText: { fontSize: 14, fontWeight: '800', color: colors.crossInk },
-  focusBannerExit: { fontSize: 15, fontWeight: '800', color: colors.crossInk, paddingHorizontal: space.xs },
-  statRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    flexWrap: 'wrap',
-    gap: space.sm,
+  focusBannerKicker: { ...type.quietLabel, fontSize: 10, color: colors.accentClay, marginBottom: 1 },
+  focusBannerText: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.ink },
+  focusBannerSteps: { paddingHorizontal: space.sm },
+  focusBannerStepsText: { fontFamily: 'Manrope_700Bold', fontSize: 12, color: colors.accentClay },
+  focusBannerExit: { fontSize: 15, fontWeight: '800', color: colors.inkQuietFaint, paddingHorizontal: space.xs },
+  statLine: {
     alignSelf: 'stretch',
-    marginTop: space.sm,
+    gap: space.xs,
+    marginTop: space.md,
     marginBottom: space.lg,
   },
+  statLineText: { ...type.quietBody, fontSize: 12, color: colors.inkQuietFaint, textAlign: 'center' },
   gridWrap: { position: 'relative', alignSelf: 'center', marginBottom: space.sm },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, alignSelf: 'stretch' },
   titleInput: { flex: 1, padding: 0, borderBottomWidth: 1, borderBottomColor: colors.line },

@@ -68,6 +68,10 @@ export default function SwipeDeckScreen({
   const [customText, setCustomText] = useState('');
   const [showKept, setShowKept] = useState(false);
   const cardRef = useRef<SwipeCardHandle>(null);
+  // A real off-ramp for a stray/mistaken swipe — a full snapshot per decision (not just
+  // "the last idea") so undo is correct across every branch advance() can take, including
+  // the second-pass reshuffle, not just the common "move to the next card" case.
+  const [history, setHistory] = useState<{ deck: TileIdea[]; rejected: TileIdea[]; kept: TileIdea[]; usedSecondPass: boolean }[]>([]);
 
   useEffect(() => {
     onProgress?.(kept, rejected, usedSecondPass);
@@ -121,8 +125,22 @@ export default function SwipeDeckScreen({
     onDone(nextKept);
   }
 
+  function undo() {
+    setHistory((h) => {
+      if (h.length === 0) return h;
+      const prev = h[h.length - 1];
+      setDeck(prev.deck);
+      setRejected(prev.rejected);
+      setKept(prev.kept);
+      setUsedSecondPass(prev.usedSecondPass);
+      lightTap();
+      return h.slice(0, -1);
+    });
+  }
+
   function handleSwipe(direction: 'left' | 'right') {
     if (!current) return;
+    setHistory((h) => [...h, { deck, rejected, kept, usedSecondPass }]);
     const rest = deck.slice(1);
     if (direction === 'right') {
       stampHit();
@@ -157,11 +175,14 @@ export default function SwipeDeckScreen({
       {!showKept && (
         <Pressable style={styles.keptToggle} onPress={() => setShowKept(true)} hitSlop={8}>
           <Text style={styles.keptToggleText}>📋 Kept ({kept.length})</Text>
+          {/* A small, deliberately quiet hint, not a separate callout — someone who's
+              never used this app has no reason to know a tap here reveals the list. */}
+          <Text style={styles.keptToggleHint}>tap to view</Text>
         </Pressable>
       )}
 
       <View style={styles.progressRow}>
-        <ProgressBar pct={progressPct} color={colors.stampGold} height={6} />
+        <ProgressBar pct={progressPct} color={colors.accentClay} height={6} />
         <Text style={styles.progressHint}>Swipe right to keep · left to skip · {kept.length}/{TARGET_KEEPS} kept</Text>
       </View>
 
@@ -192,6 +213,7 @@ export default function SwipeDeckScreen({
       ) : (
         <>
           <View style={styles.buttonRow}>
+            {history.length > 0 && <RoundButton icon="↺" tone="neutral" size={40} onPress={undo} />}
             <RoundButton icon="✕" tone="danger" onPress={() => cardRef.current?.swipe('left')} />
             <RoundButton icon="✓" tone="success" onPress={() => cardRef.current?.swipe('right')} />
           </View>
@@ -303,7 +325,7 @@ const SwipeCard = forwardRef<
 const styles = StyleSheet.create({
   wrap: { flex: 1, alignItems: 'center', justifyContent: 'space-between', paddingVertical: space.xl },
   progressRow: { width: CARD_W, alignSelf: 'center' },
-  progressHint: { ...type.tiny, textAlign: 'center', marginTop: space.sm },
+  progressHint: { fontFamily: 'Manrope_500Medium', fontSize: 11, color: colors.inkQuietFaint, textAlign: 'center', marginTop: space.sm },
   stack: { flex: 1, alignItems: 'center', justifyContent: 'center', width: '100%' },
   peek: { position: 'absolute', borderRadius: radius.lg, transform: [{ scale: 0.94 }, { translateY: 10 }] },
   card: {
@@ -328,18 +350,19 @@ const styles = StyleSheet.create({
   infoBtn: { position: 'absolute', top: space.md, right: space.md, width: 30, height: 30, alignItems: 'center', justifyContent: 'center' },
   infoBtnText: { fontSize: 16, color: colors.inkFaint },
   emoji: { fontSize: 64, marginBottom: space.lg },
-  label: { ...type.h1, textAlign: 'center' },
-  note: { ...type.body, color: colors.inkSoft, textAlign: 'center', marginTop: space.md, lineHeight: 20 },
+  label: { ...type.quietDisplay, fontSize: 24, textAlign: 'center' },
+  note: { fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.inkSoft, textAlign: 'center', marginTop: space.md, lineHeight: 20 },
   buttonRow: { flexDirection: 'row', gap: space.xxl, alignItems: 'center' },
   writeBox: { width: CARD_W },
   writeInput: {
     backgroundColor: colors.card,
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.lineQuiet,
     paddingHorizontal: space.md,
     paddingVertical: 10,
     fontSize: 14,
+    fontFamily: 'Manrope_500Medium',
     color: colors.ink,
   },
   writeBtns: { flexDirection: 'row', gap: space.sm, marginTop: space.sm },
@@ -351,16 +374,18 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     paddingVertical: 6,
     paddingHorizontal: 12,
-    ...shadow.lift,
+    borderWidth: 1,
+    borderColor: colors.lineQuiet,
   },
-  keptToggleText: { ...type.label, color: colors.ink },
+  keptToggleText: { fontFamily: 'Manrope_700Bold', fontSize: 12, color: colors.ink },
+  keptToggleHint: { fontFamily: 'Manrope_500Medium', fontSize: 9, color: colors.inkQuietFaint, marginTop: 1 },
   keptPanel: {
     position: 'absolute',
     top: 0,
     bottom: 0,
     left: 0,
     width: Math.min(SCREEN_W * 0.72, 300),
-    backgroundColor: colors.paper,
+    backgroundColor: colors.paperQuiet,
     borderTopRightRadius: radius.lg,
     borderBottomRightRadius: radius.lg,
     paddingTop: space.xl,
@@ -368,11 +393,11 @@ const styles = StyleSheet.create({
     ...shadow.lift,
   },
   keptHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: space.md },
-  keptTitle: { ...type.label, color: colors.ink },
+  keptTitle: { fontFamily: 'Manrope_700Bold', fontSize: 12, color: colors.ink },
   keptClose: { fontSize: 16, color: colors.inkFaint },
   keptList: { flex: 1 },
-  keptEmpty: { ...type.body, color: colors.inkFaint },
-  keptRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.sm, borderBottomWidth: 1, borderBottomColor: colors.line },
+  keptEmpty: { fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.inkFaint },
+  keptRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.sm, borderBottomWidth: 1, borderBottomColor: colors.lineQuiet },
   keptEmoji: { fontSize: 20 },
-  keptLabel: { ...type.body, color: colors.ink, flex: 1 },
+  keptLabel: { fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink, flex: 1 },
 });

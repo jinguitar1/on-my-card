@@ -55,6 +55,30 @@ export const CATEGORY_ACCENTS: Record<TileCategory, string> = {
   mindful: '#6A994E',
 };
 
+/** Display name per category — section headers in the curated-presets browser
+ *  (SuggestionPicker), axis labels on RadarChart. */
+export const CATEGORY_LABELS: Record<TileCategory, string> = {
+  comfort: 'Comfort',
+  adventure: 'Adventure',
+  creative: 'Creative',
+  health: 'Health',
+  career: 'Career',
+  kindness: 'Kindness',
+  fun: 'Fun',
+  mindful: 'Mindful',
+};
+
+/** One step in a tile's manual plan (TileEditScreen's "Set up a plan") — user-typed, not
+ *  AI-generated; AI features are on hold for v1. Keyed by its own `id`, not array
+ *  position, since a manual list supports real mid-list delete (unlike the AI version it
+ *  replaced, which only ever replaced its whole array at once via "Try again"). */
+export interface PlanStep {
+  id: string;
+  title: string;
+  detail?: string;
+  done?: boolean;
+}
+
 export interface Tile {
   id: string;
   cell: number; // 0..24, never CENTER
@@ -66,6 +90,9 @@ export interface Tile {
    *  hand-typed tile (the escape hatch on an empty cell). */
   bankId?: string;
   doneAt?: number; // set once crossed off
+  /** The user's own step-by-step breakdown of this tile, if they've set one up — purely
+   *  additive, absent on every tile that existed before this field did. */
+  plan?: PlanStep[];
 }
 
 export interface Reward {
@@ -138,7 +165,10 @@ export interface DraftCard {
   /** Free text the user gave the AI about what this card is for — only set alongside
    *  `pool`. */
   intent?: string;
-  source?: 'bank' | 'ai';
+  /** 'ai' stays in the union for backward compatibility with any already-persisted draft
+   *  from when AI card research was selectable here — it's no longer offered as a choice
+   *  (AI features are on hold for v1), replaced by 'custom' (type-your-own-tiles). */
+  source?: 'bank' | 'ai' | 'custom';
   /** True while a tilegen request is in flight — set the moment "Generate deck" is
    *  tapped (before `pool` exists) and cleared once it resolves either way, so the
    *  dashboard can show research-in-progress state across navigation instead of the

@@ -99,7 +99,7 @@ export default function TileSheetScreen({ route, navigation }: any) {
       />
       {!crossed && (
         <GhostButton
-          label={isFocused ? '★ Focused — tap to unfocus' : '☆ Focus on this'}
+          label={isFocused ? '★ Focused, tap to unfocus' : '☆ Focus on this'}
           onPress={toggleFocus}
           style={{ marginTop: space.sm }}
         />

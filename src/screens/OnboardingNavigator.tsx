@@ -85,8 +85,8 @@ function IntroScreen({ onStart }: { onStart: () => void }) {
           </View>
         </View>
         <Text style={styles.introSub}>
-          You'll see ideas one at a time — mostly things a little outside your comfort zone. Swipe right (or tap ✓)
-          to keep one on your card, left (or ✕) to skip it. Keep the 24 that feel right — you can edit any square
+          You'll see ideas one at a time, mostly things a little outside your comfort zone. Swipe right (or tap ✓)
+          to keep one on your card, left (or ✕) to skip it. Keep the 24 that feel right. You can edit any square
           later.
         </Text>
       </View>

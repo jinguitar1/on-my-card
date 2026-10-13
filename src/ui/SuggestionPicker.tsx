@@ -50,16 +50,14 @@ export function SuggestionPicker({
     return (
       <View style={{ gap: space.sm }}>
         <Pressable style={styles.choice} onPress={() => setMode('custom')}>
-          <Text style={styles.choiceEmoji}>✍️</Text>
           <View style={{ flex: 1 }}>
-            <Text style={styles.choiceTitle}>Type your own</Text>
+            <Text style={styles.choiceTitle}>Type Your Own</Text>
             <Text style={styles.choiceSub}>Write exactly what you want on this square.</Text>
           </View>
         </Pressable>
         <Pressable style={styles.choice} onPress={() => setMode('curated')}>
-          <Text style={styles.choiceEmoji}>🎲</Text>
           <View style={{ flex: 1 }}>
-            <Text style={styles.choiceTitle}>Curated presets</Text>
+            <Text style={styles.choiceTitle}>Curated Presets</Text>
             <Text style={styles.choiceSub}>Pick from pre-written ideas.</Text>
           </View>
         </Pressable>
@@ -73,12 +71,12 @@ export function SuggestionPicker({
         <TextInput
           value={typedLabel}
           onChangeText={setTypedLabel}
-          placeholder="Type it here"
+          placeholder="Type It Here"
           placeholderTextColor={colors.inkFaint}
           style={styles.input}
           autoFocus
         />
-        <PrimaryButton label="Add it" onPress={saveTyped} disabled={!typedLabel.trim()} style={{ marginTop: space.sm }} />
+        <PrimaryButton label="Add It" onPress={saveTyped} disabled={!typedLabel.trim()} style={{ marginTop: space.sm }} />
         <GhostButton label="← Back" onPress={() => setMode('choose')} style={{ marginTop: space.sm }} />
       </View>
     );
@@ -119,7 +117,6 @@ const styles = StyleSheet.create({
     borderColor: colors.lineQuiet,
     padding: space.md,
   },
-  choiceEmoji: { fontSize: 22 },
   choiceTitle: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.ink },
   choiceSub: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: colors.inkFaint, marginTop: 1 },
   categoryHeader: {

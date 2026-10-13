@@ -16,17 +16,28 @@ export function SheetShell({ children, onClose, dim = true }: { children: ReactN
   return (
     <View style={styles.root}>
       <Pressable style={[styles.backdrop, dim && styles.backdropDim]} onPress={onClose} />
-      <View style={styles.sheet}>
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView
-            contentContainerStyle={styles.content}
-            keyboardShouldPersistTaps="handled"
-            onScrollBeginDrag={Keyboard.dismiss}
-          >
-            {children}
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </View>
+      {/* The sheet itself IS the KeyboardAvoidingView (not a plain View wrapping one with
+          its own `flex: 1`) — that extra nesting is what broke this on-device: `sheet`'s
+          height was only ever bounded by `maxHeight`, a content-driven ("auto") size, so
+          a `flex: 1` child demanding "fill 100% of my parent" inside it was circular —
+          Yoga (native) resolves that ambiguity by collapsing the child to zero height,
+          while a browser's flexbox engine (the only place this was ever tested) is more
+          forgiving about it and renders fine anyway. The result on a real phone: the dim
+          backdrop painted correctly, but the sheet's content silently rendered at zero
+          height — "a gray screen pops up and nothing else shows up." Putting `maxHeight`
+          directly on the KeyboardAvoidingView removes the extra auto-height parent, so
+          the ScrollView's own `flex: 1` below has an unambiguous, resolved height to
+          fill instead of a circular one. */}
+      <KeyboardAvoidingView style={styles.sheet} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={Keyboard.dismiss}
+        >
+          {children}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }

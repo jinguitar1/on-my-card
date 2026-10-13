@@ -40,7 +40,7 @@ function formatTimestamp(iso: string): string {
 }
 
 function describeSync(status: { lastSyncedAt: number | null; lastError: string | null }): string {
-  if (status.lastError) return `Sync error — will retry (${status.lastError})`;
+  if (status.lastError) return `Sync error, will retry (${status.lastError})`;
   if (!status.lastSyncedAt) return 'Not synced yet';
   const mins = Math.round((Date.now() - status.lastSyncedAt) / 60000);
   if (mins < 1) return 'Synced just now';
@@ -292,7 +292,7 @@ export default function SettingsScreen({ navigation }: any) {
             </>
           ) : (
             <>
-              <Text style={styles.hint}>Not signed in — your card only lives on this device right now.</Text>
+              <Text style={styles.hint}>Not signed in. Your card only lives on this device right now.</Text>
               <PrimaryButton
                 label="Sign in to back up your card"
                 onPress={() => navigation.navigate('SignIn')}
@@ -314,7 +314,7 @@ export default function SettingsScreen({ navigation }: any) {
 
         <Text style={styles.section}>The knock on the door</Text>
         <Card style={{ gap: space.md }}>
-          <Row label="Weekly check-in" hint="A nudge on the days and times you pick — how the card's coming along.">
+          <Row label="Weekly check-in" hint="A nudge on the days and times you pick: how the card's coming along.">
             <Switch value={draft.notificationsEnabled} onValueChange={toggleNotifs} />
           </Row>
           {draft.notificationsEnabled && (
@@ -381,7 +381,7 @@ export default function SettingsScreen({ navigation }: any) {
               )}
               {coachUnavailable && (
                 <Text style={styles.hint}>
-                  Push needs a dev-client build, not Expo Go — see CLAUDE.md for the EAS setup steps.
+                  Push needs a dev-client build, not Expo Go. See CLAUDE.md for the EAS setup steps.
                 </Text>
               )}
             </Card>
@@ -436,7 +436,7 @@ export default function SettingsScreen({ navigation }: any) {
           </>
         )}
 
-        <Text style={styles.footer}>On My Card — built on the five-part app model. See DESIGN-FRAMEWORK.md.</Text>
+        <Text style={styles.footer}>On My Card, built on the five-part app model. See DESIGN-FRAMEWORK.md.</Text>
       </ScrollView>
     </SafeAreaView>
   );

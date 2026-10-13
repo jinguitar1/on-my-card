@@ -71,7 +71,7 @@ function pickForToday<T>(options: T[]): T {
 
 const STAGE_LINES: Record<CompanionStage, string[]> = {
   0: ["Pick a tile and let's get started.", 'Every card starts at zero. No rush.', "Cross off your first one when you're ready."],
-  1: ['Off to a real start.', "First bingo's in — keep going.", 'That first line counts for a lot.'],
+  1: ['Off to a real start.', "First bingo's in, keep going.", 'That first line counts for a lot.'],
   2: ["You're building real momentum.", 'Halfway to the top rung.', "This is the stretch where it starts feeling real."],
   3: ['Top rung reached. One push to finish the whole card.', "You're almost at a full card."],
   4: ['Every tile crossed. This card is done.', 'Full bloom. Time to start a new one, or just sit with this.'],
@@ -85,7 +85,7 @@ export function companionLine(card: Card, state: CompanionState): string {
     if (misses.length > 0) {
       const miss = pickForToday(misses);
       const tile = tileAt(card, miss.missingCell);
-      if (tile) return `One tile from a bingo — ${tile.emoji ?? ''} ${tile.label} would do it.`.trim();
+      if (tile) return `One tile from a bingo: ${tile.emoji ?? ''} ${tile.label} would do it.`.trim();
     }
   }
   return pickForToday(STAGE_LINES[state.stage]);

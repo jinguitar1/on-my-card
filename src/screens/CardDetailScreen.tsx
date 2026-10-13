@@ -19,14 +19,12 @@ import { RadarChart } from '../ui/RadarChart';
  *  shows any of it, by design (see CardDashboardScreen). */
 export default function CardDetailScreen({ route, navigation }: any) {
   const cardId: string = route.params?.cardId;
-  const { state, setFocusedTile, renameCard, setCardEmoji, deleteCard } = useApp();
+  const { state, setFocusedTile, renameCard, deleteCard, shuffleCard } = useApp();
   const { width } = useWindowDimensions();
   const card = state.cards.find((c) => c.id === cardId);
 
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(card?.title ?? '');
-  const [editingEmoji, setEditingEmoji] = useState(false);
-  const [emojiDraft, setEmojiDraft] = useState(card?.emoji ?? '');
   // ✕ on the focus banner dismisses the banner *and* stops the tunnel-vision dimming —
   // every tile goes back to normal so the rest of the card is visible again, but the
   // focused tile keeps its own glow + a small ★ badge (CardTile's `isFocused`) so it's
@@ -99,30 +97,6 @@ export default function CardDetailScreen({ route, navigation }: any) {
         </Pressable>
 
         <View style={styles.titleRow}>
-          {editingEmoji ? (
-            <TextInput
-              value={emojiDraft}
-              onChangeText={setEmojiDraft}
-              onBlur={() => {
-                setEditingEmoji(false);
-                setCardEmoji(cardId, emojiDraft);
-              }}
-              autoFocus
-              selectTextOnFocus
-              style={styles.emojiInput}
-            />
-          ) : (
-            <Pressable
-              onPress={() => {
-                setEmojiDraft(card.emoji ?? '');
-                setEditingEmoji(true);
-              }}
-              style={styles.emojiTap}
-            >
-              <Text style={styles.emojiTapText}>{card.emoji || '＋'}</Text>
-            </Pressable>
-          )}
-
           {editingTitle ? (
             <TextInput
               value={titleDraft}
@@ -226,6 +200,12 @@ export default function CardDetailScreen({ route, navigation }: any) {
             );
           })}
         </Animated.View>
+
+        {/* The only rearrange option — no drag gesture exists on the grid itself, so this
+            is a full reshuffle of every filled tile's position rather than moving one at
+            a time. Tap as many times as wanted; each press is an independent fresh
+            shuffle (shuffleCard), not a toggle. */}
+        <GhostButton label="🔀 Shuffle Tiles" onPress={() => shuffleCard(cardId)} style={{ marginBottom: space.md }} />
 
         {FEATURES.aiCoach &&
           (showCoach ? (
@@ -398,26 +378,6 @@ const styles = StyleSheet.create({
   gridWrap: { position: 'relative', alignSelf: 'center', marginBottom: space.sm },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, alignSelf: 'stretch' },
   titleInput: { flex: 1, padding: 0, borderBottomWidth: 1, borderBottomColor: colors.line },
-  emojiTap: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.cardSunk,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emojiTapText: { fontSize: 22, color: colors.inkFaint },
-  emojiInput: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.line,
-    fontSize: 20,
-    textAlign: 'center',
-    padding: 0,
-  },
   // Focus mode: the unfocused majority recedes hard (near-invisible + slightly
   // shrunk) rather than just faded, so the one focused tile reads as a genuine
   // spotlight/tunnel-vision effect instead of a subtle dim.

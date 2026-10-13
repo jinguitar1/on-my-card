@@ -108,12 +108,12 @@ export default function RootNavigator() {
         <Stack.Screen
           name="TileSheet"
           component={TileSheetScreen}
-          options={{ presentation: 'transparentModal', animation: 'slide_from_bottom' }}
+          options={{ presentation: 'transparentModal', animation: 'slide_from_bottom', contentStyle: { backgroundColor: 'transparent' } }}
         />
         <Stack.Screen
           name="TileEdit"
           component={TileEditScreen}
-          options={{ presentation: 'transparentModal', animation: 'slide_from_bottom' }}
+          options={{ presentation: 'transparentModal', animation: 'slide_from_bottom', contentStyle: { backgroundColor: 'transparent' } }}
         />
         <Stack.Screen name="SignIn" component={SignInScreen} options={{ presentation: 'modal' }} />
         <Stack.Screen name="CreateCard" component={CreateCardScreen} options={{ presentation: 'modal' }} />

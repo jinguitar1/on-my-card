@@ -35,13 +35,13 @@ export default function CardDashboardScreen({ navigation }: any) {
 
         {showSyncBanner && (
           <Pressable style={styles.banner} onPress={() => navigation.navigate('SignIn')}>
-            <Text style={styles.bannerText}>☁️ Back up your cards — sign in</Text>
+            <Text style={styles.bannerText}>☁️ Back up your cards: sign in</Text>
             <Text style={styles.bannerArrow}>→</Text>
           </Pressable>
         )}
 
         {state.cards.length === 0 && state.draftCards.length === 0 ? (
-          <Text style={styles.hint}>No cards yet — create one below.</Text>
+          <Text style={styles.hint}>No cards yet. Create one below.</Text>
         ) : (
           <View style={{ gap: space.md, marginTop: space.lg }}>
             {state.cards.map((card, i) => (
@@ -113,7 +113,7 @@ function DraftRow({ draft, onOpen, onDiscard }: { draft: DraftCard; onOpen: () =
     return (
       <Pressable
         style={styles.addCard}
-        onPress={() => Alert.alert('Still researching', `"${name}" can take a minute or two — we'll let you know the moment it's ready.`)}
+        onPress={() => Alert.alert('Still researching', `"${name}" can take a minute or two. We'll let you know the moment it's ready.`)}
       >
         <Text style={styles.addCardText}>🔍 Researching "{name}"…</Text>
       </Pressable>
@@ -123,7 +123,7 @@ function DraftRow({ draft, onOpen, onDiscard }: { draft: DraftCard; onOpen: () =
   if (draft.pool?.length && swipeProgress === 0) {
     return (
       <Pressable style={[styles.addCard, styles.addCardReady]} onPress={onOpen}>
-        <Text style={[styles.addCardText, styles.addCardReadyText]}>✨ "{name}" is ready — tap to start swiping</Text>
+        <Text style={[styles.addCardText, styles.addCardReadyText]}>✨ "{name}" is ready. Tap to start swiping.</Text>
       </Pressable>
     );
   }
@@ -132,7 +132,7 @@ function DraftRow({ draft, onOpen, onDiscard }: { draft: DraftCard; onOpen: () =
     return (
       <>
         <Pressable style={[styles.addCard, styles.addCardError]} onPress={onOpen}>
-          <Text style={[styles.addCardText, styles.addCardErrorText]}>⚠️ Couldn't research "{name}" — tap to try again</Text>
+          <Text style={[styles.addCardText, styles.addCardErrorText]}>⚠️ Couldn't research "{name}". Tap to try again.</Text>
         </Pressable>
         {discardLink}
       </>
@@ -140,12 +140,26 @@ function DraftRow({ draft, onOpen, onDiscard }: { draft: DraftCard; onOpen: () =
   }
 
   if (swipeProgress > 0) {
+    // Styled like a finished card's own row (same emoji circle, same title, same
+    // arrow) rather than the dashed "add card" placeholder it used to share — so a
+    // saved-and-returned-to-later draft reads as "this is clearly one of my cards,
+    // just not done yet," not as a totally different, lesser kind of thing. The dim
+    // `opacity` on the whole row (no real blur filter available cross-platform without
+    // a native dependency this app otherwise avoids) is the "clearly a draft" cue, plus
+    // an explicit DRAFT badge under the title so it's never ambiguous at a glance.
     return (
       <>
-        <Pressable style={styles.addCard} onPress={onOpen}>
-          <Text style={styles.addCardText}>
-            ↻ Continue "{name}" ({keptCount}/24 kept)
-          </Text>
+        <Pressable style={[styles.row, styles.draftRow]} onPress={onOpen}>
+          <View style={[styles.rowEmoji, styles.draftRowEmoji]}>
+            <Text style={styles.rowEmojiText}>{DEFAULT_CARD_EMOJI}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowTitle} numberOfLines={2}>
+              {name}
+            </Text>
+            <Text style={styles.draftBadge}>Draft · {keptCount}/24 Kept</Text>
+          </View>
+          <Text style={styles.rowArrow}>→</Text>
         </Pressable>
         {discardLink}
       </>
@@ -190,6 +204,9 @@ const styles = StyleSheet.create({
   rowEmojiText: { fontSize: 19 },
   rowTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.ink, flex: 1 },
   rowArrow: { fontSize: 16, fontWeight: '800', color: colors.inkQuietFaint },
+  draftRow: { marginTop: space.md, opacity: 0.55 },
+  draftRowEmoji: { backgroundColor: colors.inkQuietFaint },
+  draftBadge: { fontFamily: 'Manrope_700Bold', fontSize: 11, color: colors.inkQuietFaint, marginTop: 2 },
   addCard: {
     marginTop: space.lg,
     borderWidth: 1.5,

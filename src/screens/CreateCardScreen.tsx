@@ -1,7 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { useState } from 'react';
 import { Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { uid } from '../domain/logic';
 import { type TileIdea } from '../domain/tileBank';
@@ -53,6 +53,13 @@ interface TilegenResult {
  *  only the *entry point* for starting a new one was removed. */
 export default function CreateCardScreen({ navigation, route }: any) {
   const { state, createCard, saveDraftCard, clearDraftCard } = useApp();
+  // `KeyboardAvoidingView`'s `behavior="padding"` on iOS can under-compensate when a
+  // header sits above it inside a `SafeAreaView` that only reserves the top edge — the
+  // reported symptom (the footer CTA still sitting under the keyboard on-device, despite
+  // already being structured outside the scrolling content) is the textbook case for
+  // explicitly passing `keyboardVerticalOffset` rather than trusting the automatic
+  // measurement. `insets.top` covers the one offset that setup doesn't already see.
+  const insets = useSafeAreaInsets();
   const [draftId] = useState<string>(() => route.params?.draftId ?? uid('draft'));
   const draft = state.draftCards.find((d) => d.id === draftId);
   const isGenerating = !!draft?.generating;
@@ -128,7 +135,7 @@ export default function CreateCardScreen({ navigation, route }: any) {
       saveDraftCard(draftId, [], [], false, { title: cardTitle, pool: tiles, intent, source: 'ai', generating: false });
       void notifyOutcome(
         'Your card is ready!',
-        `${cardTitle || 'Your researched card'}: ${tiles.length} ideas are ready to swipe through — tap to continue.`
+        `${cardTitle || 'Your researched card'}: ${tiles.length} ideas are ready to swipe through. Tap to continue.`
       );
     }
 
@@ -136,7 +143,7 @@ export default function CreateCardScreen({ navigation, route }: any) {
       saveDraftCard(draftId, [], [], false, { title: cardTitle, intent, source: 'ai', generating: false, genError: message });
       void notifyOutcome(
         'Card research failed',
-        `Couldn't research "${cardTitle || 'your card'}" — tap to try again.`
+        `Couldn't research "${cardTitle || 'your card'}". Tap to try again.`
       );
     }
 
@@ -149,17 +156,17 @@ export default function CreateCardScreen({ navigation, route }: any) {
         if (polled) {
           succeed(polled);
         } else {
-          fail('Could not generate right now — try again.');
+          fail('Could not generate right now. Try again.');
         }
         return;
       }
       if (data?.error) {
-        fail(data.error === 'try again in a moment' ? 'Try again in a moment.' : 'Could not generate right now — try again.');
+        fail(data.error === 'try again in a moment' ? 'Try again in a moment.' : 'Could not generate right now. Try again.');
         return;
       }
       const parsed = JSON.parse(data.insight.content) as TilegenResult;
       if (!parsed.tiles.length) {
-        fail('Came back empty — try adding a bit more detail and generating again.');
+        fail('Came back empty. Try adding a bit more detail and generating again.');
         return;
       }
       succeed(parsed);
@@ -167,7 +174,7 @@ export default function CreateCardScreen({ navigation, route }: any) {
 
     Alert.alert(
       'Researching your card',
-      "This can take a minute or two. Feel free to close this and browse your other cards — we'll let you know the moment it's ready.",
+      "This can take a minute or two. Feel free to close this and browse your other cards. We'll let you know the moment it's ready.",
       [{ text: 'Got it', onPress: () => navigation.goBack() }]
     );
   }
@@ -191,13 +198,13 @@ export default function CreateCardScreen({ navigation, route }: any) {
         <SafeAreaView style={styles.safe} edges={['top']}>
           <View style={styles.header}>
             <Pressable onPress={() => navigation.goBack()} hitSlop={12}>
-              <Text style={styles.closeText}>Close</Text>
+              <Text style={styles.closeText}>← Back</Text>
             </Pressable>
           </View>
           <View style={styles.intentContent}>
             <Text style={[type.quietDisplay, { fontSize: 24 }]}>Still researching "{draft?.title || 'your card'}"…</Text>
             <Text style={styles.intentHint}>
-              This can take a minute or two. Feel free to close this and browse your other cards — we'll let you know
+              This can take a minute or two. Feel free to close this and browse your other cards, we'll let you know
               the moment it's ready.
             </Text>
           </View>
@@ -206,12 +213,20 @@ export default function CreateCardScreen({ navigation, route }: any) {
     }
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
+        {/* Always visible, top-left — matches the rest of the app's "← [destination]"
+            back-link convention (Today's "← Home", CardDetail's "← My Cards") rather
+            than a top-right "Close" text, and is now present on every phase of this
+            screen (here, and the deck phase below), not just this first one. */}
         <View style={styles.header}>
           <Pressable onPress={() => navigation.goBack()} hitSlop={12}>
-            <Text style={styles.closeText}>Close</Text>
+            <Text style={styles.closeText}>← Back</Text>
           </Pressable>
         </View>
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={insets.top}
+        >
           <View style={{ flex: 1 }}>
             <ScrollView
               style={{ flex: 1 }}
@@ -219,19 +234,19 @@ export default function CreateCardScreen({ navigation, route }: any) {
               keyboardShouldPersistTaps="handled"
               onScrollBeginDrag={Keyboard.dismiss}
             >
-              <Text style={[type.quietDisplay, { fontSize: 24 }]}>{title.trim() || 'New card'}</Text>
+              <Text style={[type.quietDisplay, { fontSize: 24 }]}>{title.trim() || 'New Card'}</Text>
               <TextInput
                 value={title}
                 onChangeText={setTitle}
-                placeholder="Name this card"
+                placeholder="Name This Card"
                 placeholderTextColor={colors.inkFaint}
                 style={styles.titleInput}
               />
               <Text style={styles.intentHint}>How do you want to fill this one?</Text>
               <Segmented
                 options={[
-                  { value: 'bank', label: 'Curated ideas' },
-                  { value: 'custom', label: '✍️ Customized' },
+                  { value: 'bank', label: 'Curated Ideas' },
+                  { value: 'custom', label: 'Customized' },
                 ]}
                 value={source}
                 onChange={(v) => {
@@ -239,8 +254,10 @@ export default function CreateCardScreen({ navigation, route }: any) {
                   setGenError(null);
                 }}
               />
-              {source === 'custom' && (
-                <Text style={styles.intentHint}>Type each tile in yourself — add as many as you like, aim for 24.</Text>
+              {source === 'custom' ? (
+                <Text style={styles.intentHint}>Type each tile in yourself. Add as many as you like, aim for 24.</Text>
+              ) : (
+                <Text style={styles.intentHint}>Browse pre-written ideas and add the ones you like. Aim for 24.</Text>
               )}
             </ScrollView>
             {/* Deliberately outside the ScrollView, not pinned via marginTop:'auto' inside
@@ -250,7 +267,7 @@ export default function CreateCardScreen({ navigation, route }: any) {
                 scrollable region can't be pushed off-screen the same way. */}
             <View style={styles.intentFooter}>
               <PrimaryButton
-                label={source === 'ai' ? 'Generate deck' : source === 'custom' ? 'Start typing' : 'Browse ideas'}
+                label={source === 'ai' ? 'Generate Deck' : source === 'custom' ? 'Start Typing' : 'Browse Ideas'}
                 tone="clay"
                 onPress={() => (source === 'ai' ? startGenerate() : setPhase('deck'))}
                 disabled={source === 'ai' && !intentText.trim()}
@@ -278,18 +295,26 @@ export default function CreateCardScreen({ navigation, route }: any) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.deckHeader}>
+          {/* A distinct back affordance from "Save & finish later" — that link describes
+              what tapping it *does* (autosave), this is the plain, unambiguous "go back"
+              someone looks for regardless of whether they clocked that the long label
+              means the same thing. Both call the same `closeDeck`, since there's nothing
+              it needs to do differently. */}
+          <Pressable onPress={closeDeck} hitSlop={12}>
+            <Text style={styles.closeText}>← Back</Text>
+          </Pressable>
           <TextInput
             value={title}
             onChangeText={setTitle}
             onBlur={commitDeckTitle}
-            placeholder="Name this card"
+            placeholder="Name This Card"
             placeholderTextColor={colors.inkFaint}
             style={styles.deckTitleInput}
           />
           {/* Always visible, not conditional on there being progress yet — every swipe/tile
               already autosaves, so this is always a true, safe thing to tap. */}
           <Pressable onPress={closeDeck} hitSlop={12} style={styles.deckSaveLink}>
-            <Text style={styles.closeText}>💾 Save & finish later</Text>
+            <Text style={styles.closeText}>💾 Save & Finish Later</Text>
           </Pressable>
         </View>
         {source === 'custom' ? (

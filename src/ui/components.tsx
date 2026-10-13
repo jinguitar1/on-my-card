@@ -290,10 +290,31 @@ export function CardTile({
     <Animated.View style={{ width: size, height: size, transform: [{ scale }] }}>
       <Pressable onPress={onPress} onLongPress={onLongPress} delayLongPress={300} style={{ flex: 1 }}>
         <Animated.View style={[styles.tile, { borderColor, borderWidth }, crossed && styles.tileCrossed]}>
-          {!!emoji && <Text style={styles.tileEmoji}>{emoji}</Text>}
-          <Text numberOfLines={3} style={[styles.tileLabel, crossed && styles.tileLabelCrossed]}>
-            {label}
-          </Text>
+          {/* The empty-cell placeholder ('＋', the sentinel every caller passes for an
+              unfilled square) gets its own bigger, dedicated style instead of sharing
+              `tileLabel`'s tiny (8.5pt) size meant for wrapping a multi-word label — at
+              that size a lone "+" read as barely-tappable. */}
+          {label === '＋' ? (
+            <Text style={styles.tilePlus}>{label}</Text>
+          ) : (
+            <>
+              {!!emoji && <Text style={styles.tileEmoji}>{emoji}</Text>}
+              {/* `adjustsFontSizeToFit` (not a fixed 8.5pt for every label) — a long single
+                  word (e.g. "International") at a fixed tiny size could still be a hair too
+                  wide for the tile, which React Native resolves by breaking the word itself
+                  rather than reflowing, visibly orphaning its last letter onto the next line
+                  with the following word. Shrinking the whole label to actually fit within
+                  the 3 allotted lines avoids that word-break entirely. */}
+              <Text
+                numberOfLines={3}
+                adjustsFontSizeToFit
+                minimumFontScale={0.7}
+                style={[styles.tileLabel, crossed && styles.tileLabelCrossed]}
+              >
+                {label}
+              </Text>
+            </>
+          )}
           {crossed && (
             <View style={[styles.doneBadge, { width: ribbonSize, height: ribbonSize, borderRadius: ribbonSize / 2 }]}>
               <Stamp playKey={stampKey || 1} mark="✓" size={Math.max(10, Math.round(ribbonSize * 0.62))} color="#fff" />
@@ -406,6 +427,7 @@ const styles = StyleSheet.create({
   freeText: { color: '#fff', fontSize: 8, fontWeight: '900', letterSpacing: 1, marginTop: 1 },
   tileEmoji: { fontSize: 15, marginBottom: 2 },
   tileLabel: { fontSize: 8.5, lineHeight: 10, textAlign: 'center', color: colors.ink, fontWeight: '700' },
+  tilePlus: { fontSize: 22, color: colors.inkFaint, fontWeight: '300' },
   // Full opacity, not faded to near-invisible — a friend glancing at a shared card needs
   // to actually read what got done. Grey/muted (not the brand gold), matching the
   // desaturated "dead" background rather than the still-warm gold trio.

@@ -94,7 +94,13 @@ export const type = {
   // "Quiet" redesign faces — Fraunces (a softer, less scrapbook-y serif than the Georgia
   // `display`/`h1` above) for headlines, Manrope for everything else. Additive: existing
   // `type.*` keys above are untouched, so anything not explicitly redesigned keeps Georgia.
-  quietDisplay: { fontFamily: 'Fraunces_600SemiBold', fontSize: 26, color: colors.ink, letterSpacing: -0.3 },
+  // No negative letterSpacing here (an earlier -0.3 was removed) — on-device (not just
+  // in the web preview this was designed in) it could pull adjacent glyphs of a short
+  // display string (a two/three-letter card title, "Jin") close enough to visibly
+  // collide/overlap, which read as the font being "distorted" rather than tightly
+  // tracked. Fraunces' letterforms are wide and stylized enough not to need the extra
+  // tightening a more neutral serif might.
+  quietDisplay: { fontFamily: 'Fraunces_600SemiBold', fontSize: 26, color: colors.ink },
   quietQuote: { fontFamily: 'Fraunces_500Medium_Italic', fontSize: 15, lineHeight: 23, color: colors.inkSoft },
   quietLabel: { fontFamily: 'Manrope_800ExtraBold', fontSize: 13, color: colors.inkQuietFaint, letterSpacing: 0.2 },
   quietBody: { fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.ink },

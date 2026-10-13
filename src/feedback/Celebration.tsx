@@ -135,7 +135,7 @@ function BingoBody({ label, accent }: { label: string; accent: string }) {
     <>
       <Text style={[styles.kicker, { color: accent }]}>LINE COMPLETE</Text>
       <Text style={styles.bigStamp}>BINGO</Text>
-      <Text style={styles.sub}>{label} — five in a row. That's a bingo on the card.</Text>
+      <Text style={styles.sub}>{label}: five in a row. That's a bingo on the card.</Text>
     </>
   );
 }

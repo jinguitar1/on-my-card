@@ -12,7 +12,7 @@ const LINES: string[] = [
   "Proof: you do what you say you'll do.",
   "You're the kind of person who finishes what they start.",
   'Small proof, real pattern.',
-  'This is who you are now — not who you were trying to be.',
+  'This is who you are now, not who you were trying to be.',
   "Nobody saw that but you. That's the point.",
 ];
 

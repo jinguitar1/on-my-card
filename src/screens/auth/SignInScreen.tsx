@@ -93,7 +93,7 @@ export default function SignInScreen({ navigation }: any) {
     setBusy(true);
     const { error: err } = await signInWithPassword(email, password);
     setBusy(false);
-    if (err) setError('Wrong email or password — switch to "Code," or tap "Forgot password?" below.');
+    if (err) setError('Wrong email or password. Switch to "Code," or tap "Forgot password?" below.');
     else navigation.goBack();
   }
 
@@ -244,7 +244,7 @@ export default function SignInScreen({ navigation }: any) {
               <Text style={styles.hint}>
                 {via === 'recovery'
                   ? 'Choose a new password to finish resetting.'
-                  : 'Skip the code next time you sign in. Optional — you can always do this later in Settings.'}
+                  : 'Skip the code next time you sign in. Optional. You can always do this later in Settings.'}
               </Text>
               <TextInput
                 value={newPassword}

@@ -90,7 +90,7 @@ export default function CuratedBrowseScreen({
 
       {kept.length > 0 && (
         <View style={styles.footer}>
-          <GhostButton label={`Finish with ${kept.length} tile${kept.length === 1 ? '' : 's'}`} onPress={() => onDone(kept)} />
+          <GhostButton label={`Finish With ${kept.length} Tile${kept.length === 1 ? '' : 's'}`} onPress={() => onDone(kept)} />
         </View>
       )}
     </View>

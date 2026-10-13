@@ -55,6 +55,7 @@ interface AppApi {
   renameCard: (cardId: string, title: string) => void;
   setCardEmoji: (cardId: string, emoji: string) => void;
   deleteCard: (cardId: string) => void;
+  shuffleCard: (cardId: string) => void;
   saveDraftCard: (
     draftId: string,
     kept: DraftCardTile[],
@@ -324,6 +325,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Randomly reassigns which (already-filled) cell each existing tile sits in — an
+  // alternative to manually dragging tiles around one at a time, since this app has no
+  // drag-to-rearrange gesture. Only permutes among cells that already have a tile; empty
+  // cells stay empty and the count of filled cells never changes. Repeatable as many
+  // times as the user likes — each call is an independent fresh shuffle, not a toggle.
+  const shuffleCard = useCallback((cardId: string) => {
+    setState((st) => {
+      const card = st.cards.find((c) => c.id === cardId);
+      if (!card) return st;
+      const cells = card.tiles.map((t) => t.cell);
+      for (let i = cells.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [cells[i], cells[j]] = [cells[j], cells[i]];
+      }
+      const nextCard = { ...card, tiles: card.tiles.map((t, i) => ({ ...t, cell: cells[i] })) };
+      return { ...st, cards: st.cards.map((c) => (c.id === cardId ? nextCard : c)) };
+    });
+  }, []);
+
   // --- draft cards (any number of in-progress swipe-deck sessions, paused/resumed/
   // researching independently of each other — see DraftCard's own comment for why this
   // is a list, not a single slot) ---
@@ -548,6 +568,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       renameCard,
       setCardEmoji,
       deleteCard,
+      shuffleCard,
       saveDraftCard,
       clearDraftCard,
       pressTile,
@@ -574,6 +595,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       renameCard,
       setCardEmoji,
       deleteCard,
+      shuffleCard,
       saveDraftCard,
       clearDraftCard,
       pressTile,

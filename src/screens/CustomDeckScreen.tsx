@@ -38,7 +38,10 @@ export default function CustomDeckScreen({
   const addTile = () => {
     const trimmed = label.trim();
     if (!trimmed) return;
-    const idea: TileIdea = { id: uid('custom'), emoji: '✍️', label: trimmed, note: note.trim() };
+    // No default/auto-assigned emoji here (a hand-with-pencil icon used to stand in for
+    // every one) — a custom tile just carries whatever the user typed, nothing picked on
+    // their behalf; CardTile already skips its emoji slot entirely when it's empty.
+    const idea: TileIdea = { id: uid('custom'), emoji: '', label: trimmed, note: note.trim() };
     const next = [...kept, idea];
     setKept(next);
     stampHit();
@@ -67,10 +70,10 @@ export default function CustomDeckScreen({
         keyboardShouldPersistTaps="handled"
         onScrollBeginDrag={Keyboard.dismiss}
       >
-        {kept.length === 0 && <Text style={styles.empty}>Add your first tile below — a dare, a goal, anything you want on the card.</Text>}
+        {kept.length === 0 && <Text style={styles.empty}>Add your first tile below. A dare, a goal, anything you want on the card.</Text>}
         {kept.map((t) => (
           <View key={t.id} style={styles.row}>
-            <Text style={styles.rowEmoji}>{t.emoji}</Text>
+            {!!t.emoji && <Text style={styles.rowEmoji}>{t.emoji}</Text>}
             <Text style={styles.rowLabel} numberOfLines={1}>
               {t.label}
             </Text>
@@ -85,7 +88,7 @@ export default function CustomDeckScreen({
         <TextInput
           value={label}
           onChangeText={setLabel}
-          placeholder="What do you want to do?"
+          placeholder="What Do You Want To Do?"
           placeholderTextColor={colors.inkFaint}
           style={styles.input}
           returnKeyType="done"
@@ -93,15 +96,15 @@ export default function CustomDeckScreen({
         <TextInput
           value={note}
           onChangeText={setNote}
-          placeholder="Add a note (optional)"
+          placeholder="Add A Note (Optional)"
           placeholderTextColor={colors.inkFaint}
           style={[styles.input, styles.noteInput]}
           multiline
         />
-        <PrimaryButton label="+ Add tile" tone="clay" onPress={addTile} disabled={!label.trim()} style={{ marginTop: space.sm }} />
+        <PrimaryButton label="+ Add Tile" tone="clay" onPress={addTile} disabled={!label.trim()} style={{ marginTop: space.sm }} />
         {kept.length > 0 && (
           <GhostButton
-            label={`Finish with ${kept.length} tile${kept.length === 1 ? '' : 's'}`}
+            label={`Finish With ${kept.length} Tile${kept.length === 1 ? '' : 's'}`}
             onPress={() => onDone(kept)}
             style={{ marginTop: space.xs }}
           />

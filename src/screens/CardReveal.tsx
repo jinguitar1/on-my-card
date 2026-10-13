@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { type TileIdea } from '../domain/tileBank';
@@ -39,9 +39,19 @@ export function CardReveal({
 
   return (
     <SafeAreaView style={styles.safe}>
+      {/* The grid (up to 420px tall) + headline + companion row + name field never fit a
+          real phone screen at once, let alone once the keyboard takes another third of
+          it — this used to be a fixed, non-scrolling column, so the keyboard opening just
+          force-squeezed everything with nowhere for the overflow to go, cutting the top
+          of the card off-screen. A ScrollView gives it somewhere to go; the CTA stays
+          outside it (below, fixed) so it's never what scrolls out of reach. */}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={{ flex: 1 }}>
-      <View style={styles.revealWrap}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.revealWrap}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.revealHeadline}>Your card is ready.</Text>
         <View style={[styles.gridWrap, { width: gridW, height: gridW }]}>
           {Array.from({ length: CELL_COUNT }).map((_, cell) => {
@@ -72,7 +82,7 @@ export function CardReveal({
             definition regardless. */}
         <View style={styles.companionRow}>
           <Companion stage={0} size={56} />
-          <Text style={styles.companionLine}>Say hello — it'll grow as you cross tiles off.</Text>
+          <Text style={styles.companionLine}>Say hello. It'll grow as you cross tiles off.</Text>
         </View>
 
         <Text style={styles.nameLabel}>Name your card</Text>
@@ -85,10 +95,9 @@ export function CardReveal({
           autoFocus
           selectTextOnFocus
         />
-      </View>
+      </ScrollView>
       <View style={styles.footer}>
         <PrimaryButton label={ctaLabel} onPress={() => onSave(title)} disabled={!title.trim()} style={{ flex: 1 }} />
-      </View>
       </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -98,7 +107,7 @@ export function CardReveal({
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.paperQuiet },
   footer: { padding: space.lg, flexDirection: 'row' },
-  revealWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space.lg },
+  revealWrap: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: space.lg },
   revealHeadline: { ...type.quietDisplay, fontSize: 28, textAlign: 'center', marginBottom: space.xl },
   gridWrap: { position: 'relative' },
   companionRow: {

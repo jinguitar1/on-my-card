@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { isTileCrossed, tileAt } from '../domain/logic';
+import { isTileCrossed, prettyDate, tileAt } from '../domain/logic';
 import { CENTER } from '../domain/types';
 import { playOutcomeFeedback } from '../feedback/celebrate';
 import { useSound } from '../feedback/sound';
@@ -19,16 +19,17 @@ import { colors, space, type } from '../ui/theme';
  *  `TileEditScreen`, stacked on top of this one. */
 export default function TileSheetScreen({ route, navigation }: any) {
   const cell: number = route.params?.cell ?? 0;
-  const cardId: string = route.params?.cardId;
-  const { state, setTile, pressTile, clearTile, setFocusedTile } = useApp();
+  const scheduleId: string = route.params?.scheduleId;
+  const { state, createGoal, setTile, pressTile, clearTile, setFocusedTile } = useApp();
   const sound = useSound();
-  const card = state.cards.find((c) => c.id === cardId);
+  const schedule = state.schedules.find((s) => s.id === scheduleId);
+  const card = schedule?.instances[schedule.instances.length - 1];
   const tile = card ? tileAt(card, cell) : undefined;
   const isEmpty = !tile;
 
   const usedBankIds = useMemo(() => new Set((card?.tiles ?? []).map((t) => t.bankId).filter(Boolean) as string[]), [card]);
 
-  if (!card || cell === CENTER) {
+  if (!card || !schedule || cell === CENTER) {
     navigation.goBack();
     return null;
   }
@@ -43,7 +44,7 @@ export default function TileSheetScreen({ route, navigation }: any) {
   // global queue pressTile enqueues into, independent of which screen called it); haptics
   // and sound are replayed here explicitly since they're screen-local.
   const crossOff = () => {
-    const outcome = pressTile(cardId, cell);
+    const outcome = pressTile(scheduleId, cell);
     playOutcomeFeedback(outcome, sound);
     close();
   };
@@ -52,7 +53,7 @@ export default function TileSheetScreen({ route, navigation }: any) {
   // back to the grid instead of leaving you sitting on this sheet, matching every other
   // action here.
   const toggleFocus = () => {
-    setFocusedTile(cardId, isFocused ? null : tile!.id);
+    setFocusedTile(scheduleId, isFocused ? null : tile!.id);
     close();
   };
 
@@ -70,7 +71,20 @@ export default function TileSheetScreen({ route, navigation }: any) {
           <SuggestionPicker
             usedBankIds={usedBankIds}
             onPicked={(seed) => {
-              setTile(cardId, cell, seed);
+              // A quick fill from the grid stays a one-tap action — sensible defaults
+              // (Medium / one-off), both editable later from the goal's own TileEdit
+              // screen, rather than forcing a difficulty/type prompt before this square
+              // can be filled at all.
+              const goal = createGoal({
+                title: seed.label,
+                difficulty: 'medium',
+                type: 'oneOff',
+                emoji: seed.emoji,
+                note: seed.note,
+                category: seed.category,
+                bankId: seed.bankId,
+              });
+              setTile(scheduleId, cell, goal.id);
               close();
             }}
           />
@@ -83,13 +97,19 @@ export default function TileSheetScreen({ route, navigation }: any) {
     <SheetShell onClose={close}>
       <View style={styles.header}>
         <Text style={[type.quietDisplay, styles.headerTitle]}>
-          {tile!.emoji} {tile!.label}
+          {tile!.emoji} {tile!.title}
         </Text>
         <Pressable onPress={close} hitSlop={8}>
           <Text style={styles.close}>Close</Text>
         </Pressable>
       </View>
       {!!tile!.note && <Text style={styles.lead}>{tile!.note}</Text>}
+      {!!tile!.deadline && (
+        <Text style={[styles.deadline, !crossed && tile!.deadline < Date.now() && styles.deadlineOverdue]}>
+          {!crossed && tile!.deadline < Date.now() ? 'Was due ' : 'Due '}
+          {prettyDate(tile!.deadline)}
+        </Text>
+      )}
 
       <PrimaryButton
         label={crossed ? 'Mark not done' : 'I did this'}
@@ -106,12 +126,12 @@ export default function TileSheetScreen({ route, navigation }: any) {
       )}
       {/* Always available, even on a crossed tile — it's the only way back into a
           finished tile's note or plan afterward. */}
-      <GhostButton label="✎ Edit" onPress={() => navigation.navigate('TileEdit', { cardId, cell })} style={{ marginTop: space.sm }} />
+      <GhostButton label="✎ Edit" onPress={() => navigation.navigate('TileEdit', { scheduleId, cell })} style={{ marginTop: space.sm }} />
       <GhostButton
         danger
         label="Remove this square"
         onPress={() => {
-          clearTile(cardId, cell);
+          clearTile(scheduleId, cell);
           close();
         }}
         style={{ marginTop: space.sm }}
@@ -128,4 +148,6 @@ const styles = StyleSheet.create({
   headerTitle: { flex: 1, marginRight: space.sm, fontSize: 24 },
   close: { fontFamily: 'Manrope_700Bold', fontSize: 13, color: colors.inkQuietFaint, paddingTop: 4 },
   lead: { ...type.quietBody, color: colors.inkSoft, lineHeight: 20 },
+  deadline: { ...type.quietBody, fontSize: 12, color: colors.inkQuietFaint, marginTop: space.xs },
+  deadlineOverdue: { color: colors.danger, fontWeight: '700' },
 });

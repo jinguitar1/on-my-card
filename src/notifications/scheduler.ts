@@ -2,7 +2,15 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
 import { cardSummary } from '../domain/logic';
-import type { AppState } from '../domain/types';
+import type { AppState, CardInstance } from '../domain/types';
+
+/** Every schedule's current (most recent) instance, active ones only — a finalized/ended
+ *  instance has nothing left to "check in" on. */
+function activeInstances(state: AppState): CardInstance[] {
+  return state.schedules
+    .map((s) => s.instances[s.instances.length - 1])
+    .filter((i): i is CardInstance => !!i && i.lifecycleState === 'active');
+}
 
 /**
  * Local notifications — the retention hook. Just one weekly check-in, summarizing
@@ -54,17 +62,18 @@ export async function cancelAll(): Promise<void> {
 export async function reconcileNotifications(state: AppState): Promise<void> {
   if (web) return;
   await cancelAll();
-  if (!state.settings.notificationsEnabled || state.cards.length === 0) return;
+  const instances = activeInstances(state);
+  if (!state.settings.notificationsEnabled || instances.length === 0) return;
 
   const { weeklyCheckinDays, weeklyCheckinMinutes } = state.settings;
-  const totals = state.cards.reduce(
-    (acc, c) => {
-      const s = cardSummary(c);
+  const totals = instances.reduce(
+    (acc, instance) => {
+      const s = cardSummary(instance);
       return { crossed: acc.crossed + s.crossed, total: acc.total + s.total, bingos: acc.bingos + s.bingos };
     },
     { crossed: 0, total: 0, bingos: 0 }
   );
-  const cardCount = state.cards.length;
+  const cardCount = instances.length;
 
   for (const day of weeklyCheckinDays) {
     const weekday = (((day % 7) + 7) % 7) + 1; // expo: 1 = Sunday

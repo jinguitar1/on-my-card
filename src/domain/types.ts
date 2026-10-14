@@ -1,19 +1,29 @@
 /**
- * On My Card — core data model (schema v5).
+ * On My Card — core data model (schema v6).
  *
- * The user can build any number of cards (a "My Cards" dashboard lists them); each one
- * is a fixed 5×5 grid of comfort-zone challenges and new experiences, built by swiping
- * through a curated bank of ideas (see tileBank.ts) rather than typed in. The centre
- * cell (12) is a permanent FREE space. Completing a line (row/column/diagonal) is a
- * bingo — a checkpoint against that card's own reward ladder; a card is complete when
- * every tile on it is crossed off. (Schema v4 and earlier had exactly one card, ever —
- * see AppStateContext's hydrate migration for how an old single-card blob becomes the
- * first entry in `cards`.)
+ * Schema v6 (Stage 1 of the timeline/goal rearchitecture) replaces the old permanent,
+ * never-expiring `Card` with a `Schedule` (daily/weekly/monthly/annual/custom, see
+ * schedule.ts for the boundary math) that produces a sequence of `CardInstance`s, one per
+ * resolved period — a schedule is the persistent, named thing; an instance is one
+ * period's playable 5×5 board, built from `Goal` library records via `placement.ts`'s
+ * balanced, Hard-tile-constrained deal. See `src/storage/migrations.ts` for how a v5
+ * permanent `Card`/`Tile` losslessly becomes a never-expiring custom `Schedule` with one
+ * `CardInstance`. (Schema v4 and earlier had exactly one card, ever, and v5 had any number
+ * of permanent cards with no timeline at all — both migrations live in that same file now,
+ * not inlined in AppStateContext's hydrate.)
+ *
+ * The centre cell (12) is still a permanent FREE space; completing a line is still a
+ * bingo. Scoring, win-pattern tiers beyond plain lines, declared rewards, swap/rollover
+ * limits, streaks, and photo-proof UI are Stage 2+ — see `CardInstance.predecessorInstanceId`
+ * and `Schedule.instances`' full retained history, both added now specifically so those
+ * stages are additive instead of a second migration.
  *
  * Plain JSON so it round-trips through the Repository (local now, Supabase later).
  */
 
-export const SCHEMA_VERSION = 5;
+import type { CardSchedule } from './schedule';
+
+export const SCHEMA_VERSION = 6;
 
 export const GRID = 5;
 export const CELL_COUNT = GRID * GRID; // 25
@@ -102,83 +112,120 @@ export interface Reward {
   claimedAt?: number;
 }
 
-export interface Card {
+// --- Stage 1 of the timeline/goal rearchitecture (schema v6) ------------------------
+//
+// A `Goal` is a reusable library record (title, difficulty, type, recurring target) —
+// separate from a `CardTileInstance`, which snapshots the gameplay fields it needs
+// (difficulty/type/target) at the moment a card is generated, plus a `goalId` back-
+// reference. This split is what the product rules' "don't calculate historical results
+// from mutable current goal definitions" requires: editing a Goal later never rewrites
+// what an already-generated card's tiles say they were worth.
+//
+// A `Schedule` (the persisted, app-level record — extends schedule.ts's pure
+// `CardSchedule`, which stays dependency-free so its boundary math and its tests never
+// need to know about the rest of this file) owns every `CardInstance` it has ever had,
+// forever, append-only. Streak computation (Stage 2+) needs the full run; a "history
+// screen hasn't been built yet" is a UI gap, not a reason to discard data a user is
+// already accumulating during this stage's TestFlight window.
+
+export interface Goal {
   id: string;
   title: string;
-  /** A small personal touch shown big on the dashboard — how the user feels about this
-   *  card, not a category icon. Free choice (their own device emoji keyboard), not a
-   *  curated set. Optional; falls back to a generic 🃏 wherever it's displayed. */
+  details?: string;
+  difficulty: 'easy' | 'medium' | 'hard';
+  type: 'oneOff' | 'recurring';
+  /** Required when `type === 'recurring'` — how many times this goal needs doing before
+   *  the tile it's snapshotted onto counts as done. */
+  recurringTarget?: number;
+  /** Carried from the curated bank when a goal is added that way (SuggestionPicker's
+   *  "Curated Ideas") — absent for a hand-typed goal. Every one of these is copied onto
+   *  a `CardTileInstance` at generation time, same as the goal's title/difficulty/type. */
   emoji?: string;
-  /** Free text the user gave when creating this card, if it was AI-researched
-   *  (FEATURES.aiCardGen) — absent for a curated-bank card. Kept for reference/future AI
-   *  coaching context; not shown anywhere in the UI yet. */
-  intent?: string;
-  year: number;
+  note?: string;
+  category?: TileCategory;
+  bankId?: string;
   createdAt: number;
-  tiles: Tile[]; // up to 24, from the swipe deck
-  rewards: Reward[];
-  /** The one tile the user is currently focusing on, if any — dims the rest of the grid
-   *  and steers AI coaching (nudge/reflection) toward it. Never a crossed tile: crossing
-   *  the focused tile off clears this. */
+  /** Archived goals stay in the library (past cards still reference them by id for
+   *  display) but are excluded from "eligible goals" counts for new cards. */
+  archivedAt?: number;
+}
+
+export interface CardTileInstance {
+  id: string;
+  cell: number; // 0..24, never CENTER
+  /** Which `Goal` this tile was generated from. */
+  goalId: string;
+  // Snapshotted from the Goal at generation time — see the module comment above for why
+  // this isn't just a live join against `goalId`.
+  title: string;
+  emoji?: string;
+  note?: string;
+  category?: TileCategory;
+  bankId?: string;
+  difficulty: 'easy' | 'medium' | 'hard';
+  type: 'oneOff' | 'recurring';
+  target?: number;
+  /** Current progress toward `target`, for a recurring tile. Never exceeds `target`. */
+  progress?: number;
+  doneAt?: number;
+  plan?: PlanStep[];
+  /** Local-only photo reference — optional accountability, never a completion gate (Stage
+   *  1 doesn't yet expose UI for this; the field exists so Stage 2's photo-proof UI is
+   *  additive, not a second migration). */
+  photoUri?: string;
+  /** Epoch ms — an optional deadline for this one tile, this one card cycle. Instance-local
+   *  like `plan`/`progress`/`doneAt`, not on `Goal`: a deadline is specific to "finish this
+   *  by Friday" on *this* card, not a permanent property of the reusable goal, so a fresh
+   *  tile (new cycle, or a swap) never inherits a stale one. Set/cleared from TileEditScreen,
+   *  purely informational for now (no overdue gating or scoring tie-in). */
+  deadline?: number;
+}
+
+export interface CardInstance {
+  id: string;
+  scheduleId: string;
+  /** This instance's position in its schedule's period sequence — see schedule.ts's
+   *  `Period.index`. */
+  periodIndex: number;
+  /** Resolved half-open range for this specific instance, frozen at creation (not
+   *  re-resolved later — a schedule's own anchor could in principle be inspected again,
+   *  but an instance's actual played period never silently moves). */
+  start: number;
+  end: number;
+  createdAt: number;
+  /** The exact seed `placement.ts` used to generate this instance's layout — kept for
+   *  reproducibility if a placement conflict is ever reported back. */
+  placementSeed: string;
+  tiles: CardTileInstance[];
+  swapUsed: boolean;
+  /** The instance this one replaced, if any (every repeating schedule's 2nd+ instance has
+   *  one). Unused by Stage 1 itself — Stage 2's rollover selection reads a predecessor's
+   *  incomplete tiles through this link, so it exists now rather than being unreconstructable
+   *  later. */
+  predecessorInstanceId?: string;
+  lifecycleState: 'active' | 'finalized';
+  /** Carried over verbatim from a migrated v5 `Card.rewards` — legacy/decorative until
+   *  Stage 2 reshapes rewards into the tier system the product rules describe. Absent on
+   *  any instance created fresh under this schema. */
+  rewards?: Reward[];
   focusedTileId?: string;
 }
 
-/** A tile the user has already swiped a decision on while building a card — kept or
- *  rejected. Structurally identical to tileBank.ts's `TileIdea`, defined separately here
- *  (rather than imported) so this file never depends on tileBank.ts, which itself
- *  depends on this file for `TileCategory` — importing the other way would be circular. */
-export interface DraftCardTile {
-  id: string;
-  emoji: string;
-  label: string;
-  note: string;
-  category?: TileCategory;
+/** The persisted, app-level schedule record. Extends schedule.ts's pure `CardSchedule`
+ *  (title/mode/repeat/timezone/anchor fields/lifecycle) with the one thing that's
+ *  app-state, not boundary math: every instance this schedule has ever produced. */
+export interface Schedule extends CardSchedule {
+  instances: CardInstance[];
 }
 
-/** An in-progress "building a card" session, saved so it can be paused and resumed —
- *  picking 24 tiles in one sitting isn't always realistic. Cleared once the card is
- *  actually created (`AppStateContext`'s `clearDraftCard`).
- *
- *  `AppState.draftCards` is a *list*, not a single slot — a card being AI-researched in
- *  the background must not block starting a second, independent card (bank or AI) in the
- *  meantime, and a single-slot model can't tell two concurrent drafts apart without one
- *  silently overwriting the other's progress. Each draft carries its own stable `id`,
- *  minted client-side the moment a "Create a new card" session starts and threaded through
- *  every `saveDraftCard`/`clearDraftCard` call for that session — it's unrelated to the
- *  `Card.id` a draft eventually becomes once `createCard` runs. */
-export interface DraftCard {
-  id: string;
-  kept: DraftCardTile[];
-  rejected: DraftCardTile[];
-  usedSecondPass: boolean;
-  /** The name typed on the intent screen, if any — persisted here (not just local screen
-   *  state) specifically so it survives navigating away during a background generation
-   *  and back; it used to live only in CreateCardScreen's own state and was silently lost
-   *  on that round trip, which is why a named "Disneyland 2026" draft could come back as
-   *  the generic "My 2026 Card" default once research finished. */
-  title?: string;
-  /** Only set for an AI-researched card (FEATURES.aiCardGen) — the full generated pool of
-   *  ideas, persisted so a resumed draft's remaining deck doesn't silently fall back to
-   *  the curated bank (SwipeDeckScreen has no other way to know a non-bank deck was ever
-   *  in play). Absent for a bank-sourced draft. */
-  pool?: DraftCardTile[];
-  /** Free text the user gave the AI about what this card is for — only set alongside
-   *  `pool`. */
-  intent?: string;
-  /** 'ai' stays in the union for backward compatibility with any already-persisted draft
-   *  from when AI card research was selectable here — it's no longer offered as a choice
-   *  (AI features are on hold for v1), replaced by 'custom' (type-your-own-tiles). */
-  source?: 'bank' | 'ai' | 'custom';
-  /** True while a tilegen request is in flight — set the moment "Generate deck" is
-   *  tapped (before `pool` exists) and cleared once it resolves either way, so the
-   *  dashboard can show research-in-progress state across navigation instead of the
-   *  user being stuck waiting on CreateCardScreen itself. */
-  generating?: boolean;
-  /** Set only if the in-flight generation above failed, so re-opening "Create a new
-   *  card" after navigating away can surface what happened instead of silently
-   *  pretending nothing was ever tried. Cleared on the next generate attempt. */
-  genError?: string;
-}
+// `Card`, `Tile`, `DraftCardTile`, and `DraftCard` (the pre-Stage-1 permanent-card model,
+// and the paused-build-session concept that went with it) are gone from the live domain
+// model as of schema v6 — see `src/storage/migrations.ts` for the legacy shapes, kept
+// there (migration-only, not exported for general use) since v5 data still needs to be
+// read and transformed. Goals are now a persistent library (see `Goal` above) you build up
+// over time rather than a 24-in-one-sitting swipe session, so there's no longer a
+// multi-step "build a card" session to pause mid-way — picking goals + a timeline +
+// generating is meant to be quick enough not to need it.
 
 export type LogKind = 'tile' | 'bingo' | 'card' | 'reward';
 
@@ -212,16 +259,13 @@ export const DEFAULT_SETTINGS: Settings = {
 
 export interface AppState {
   schemaVersion: number;
-  /** Every bingo card the user has built — empty until the welcome → swipe-deck →
-   *  reveal flow finishes building the first one. Newest first. */
-  cards: Card[];
-  /** Every card currently being built — empty array when nothing's in progress. Was a
-   *  single `draftCard: DraftCard | null` slot (added after schema v5 shipped as a purely
-   *  additive field); changed to a list so a background AI-researched draft and an
-   *  independent second draft can coexist instead of one clobbering the other. See
-   *  `AppStateContext`'s hydrate for the (also lossless, no schema-version-bump) transform
-   *  from the old single-slot shape. */
-  draftCards: DraftCard[];
+  /** The goal library — every `Goal` the user has defined, across every schedule. Empty
+   *  until onboarding's first card is built. */
+  goals: Goal[];
+  /** Every schedule the user has created — the dashboard lists these (not raw cards
+   *  directly anymore), each opening its current `CardInstance` when opened. Newest
+   *  first. */
+  schedules: Schedule[];
   settings: Settings;
   log: LogEntry[]; // newest first
 }

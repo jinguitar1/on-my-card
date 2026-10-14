@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { deriveAnchor } from '../domain/schedule';
 import { type TileIdea } from '../domain/tileBank';
 import { useApp } from '../state/AppStateContext';
 import { CardReveal } from './CardReveal';
@@ -12,7 +13,7 @@ import { categoryColor, colors, space, type } from '../ui/theme';
 type Phase = 'welcome' | 'intro' | 'deck' | 'reveal';
 
 export default function OnboardingNavigator() {
-  const { createCard, updateSettings } = useApp();
+  const { createGoal, createSchedule, updateSettings } = useApp();
   const [phase, setPhase] = useState<Phase>('welcome');
   const [kept, setKept] = useState<TileIdea[]>([]);
 
@@ -39,9 +40,20 @@ export default function OnboardingNavigator() {
       defaultTitle={`My ${new Date().getFullYear()} Card`}
       ctaLabel="Enter my card"
       onSave={(title) => {
-        createCard(
-          kept.map((t) => ({ label: t.label, emoji: t.emoji, note: t.note, category: t.category, bankId: t.id })),
-          title
+        // The very first card stays exactly as frictionless to create as it always was —
+        // no timeline-picker UI here, since onboarding's whole framing is already a yearly
+        // commitment ("This is the year you say yes," "My {year} Card"). It's wired
+        // straight to an annual, repeating, calendar-year schedule under Stage 1's model
+        // without asking anything new.
+        const goals = kept.map((t) =>
+          createGoal({ title: t.label, difficulty: 'medium', type: 'oneOff', emoji: t.emoji, note: t.note, category: t.category, bankId: t.id })
+        );
+        const now = Date.now();
+        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const anchor = deriveAnchor({ mode: 'annual', now, timezone, rollingAnchor: false });
+        createSchedule(
+          { title, mode: 'annual', repeat: true, timezone, rollingAnchor: false, ...anchor },
+          goals.map((g) => g.id)
         );
         void updateSettings({ onboardingComplete: true });
       }}

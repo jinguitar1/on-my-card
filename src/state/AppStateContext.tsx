@@ -13,19 +13,21 @@ import { AppState as RNAppState } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
 import { FEATURES } from '../config/features';
 import { MAX_BINGOS, bingoCount, bonusFor, completedLines, isCardComplete, lineLabel, uid } from '../domain/logic';
+import { conflictingLines, placeTiles, type PlacementGoal } from '../domain/placement';
+import { boundaryForIndex, deriveAnchor, nextPeriod, type CardSchedule, type TimelineMode } from '../domain/schedule';
 import { emptyState } from '../domain/seed';
 import {
   CENTER,
   DEFAULT_SETTINGS,
-  SCHEMA_VERSION,
   type AppState,
-  type Card,
-  type DraftCard,
-  type DraftCardTile,
+  type CardInstance,
+  type CardTileInstance,
+  type Goal,
+  type LineKey,
   type PlanStep,
   type Reward,
+  type Schedule,
   type Settings,
-  type Tile,
   type TileCategory,
   type TileOutcome,
   EMPTY_TILE_OUTCOME,
@@ -35,14 +37,23 @@ import { setHapticsEnabled } from '../feedback/haptics';
 import { setSoundEnabled } from '../feedback/sound';
 import { cancelAll, reconcileNotifications } from '../notifications/scheduler';
 import { repository } from '../storage';
+import { migrate } from '../storage/migrations';
 
-export interface TileSeed {
-  label: string;
+export interface GoalInput {
+  title: string;
+  details?: string;
+  difficulty: Goal['difficulty'];
+  type: Goal['type'];
+  recurringTarget?: number;
   emoji?: string;
   note?: string;
   category?: TileCategory;
   bankId?: string;
 }
+
+export type ScheduleDefinition = Omit<CardSchedule, 'id' | 'createdAt' | 'lifecycleState'>;
+
+export type CreateScheduleResult = { ok: true; scheduleId: string } | { ok: false; conflictingLines: LineKey[] };
 
 interface AppApi {
   ready: boolean;
@@ -51,32 +62,31 @@ interface AppApi {
   dismissCelebration: () => void;
   syncStatus: { lastSyncedAt: number | null; lastError: string | null };
 
-  createCard: (kept: TileSeed[], title: string, emoji?: string, intent?: string) => void;
-  renameCard: (cardId: string, title: string) => void;
-  setCardEmoji: (cardId: string, emoji: string) => void;
-  deleteCard: (cardId: string) => void;
-  shuffleCard: (cardId: string) => void;
-  saveDraftCard: (
-    draftId: string,
-    kept: DraftCardTile[],
-    rejected: DraftCardTile[],
-    usedSecondPass: boolean,
-    extra?: { title?: string; pool?: DraftCardTile[]; intent?: string; source?: 'bank' | 'ai' | 'custom'; generating?: boolean; genError?: string }
-  ) => void;
-  clearDraftCard: (draftId: string) => void;
+  // goal library
+  createGoal: (input: GoalInput) => Goal;
+  updateGoal: (goalId: string, patch: Partial<GoalInput>) => void;
+  archiveGoal: (goalId: string) => void;
 
-  pressTile: (cardId: string, cell: number) => TileOutcome;
-  setTileDone: (cardId: string, cell: number, done: boolean) => void;
-  setTile: (cardId: string, cell: number, seed: TileSeed) => void;
-  clearTile: (cardId: string, cell: number) => void;
-  setFocusedTile: (cardId: string, tileId: string | null) => void;
-  updateTileContent: (cardId: string, cell: number, patch: { label?: string; note?: string }) => void;
-  setTilePlan: (cardId: string, cell: number, plan: PlanStep[]) => void;
+  // schedules + the current card instance they produce
+  createSchedule: (definition: ScheduleDefinition, goalIds: string[]) => CreateScheduleResult;
+  renameSchedule: (scheduleId: string, title: string) => void;
+  deleteSchedule: (scheduleId: string) => void;
+  shuffleCurrentInstance: (scheduleId: string) => void;
 
-  addReward: (cardId: string) => void;
-  editReward: (cardId: string, rewardId: string, patch: Partial<Reward>) => void;
-  removeReward: (cardId: string, rewardId: string) => void;
-  claimReward: (cardId: string, rewardId: string) => void;
+  pressTile: (scheduleId: string, cell: number) => TileOutcome;
+  setTile: (scheduleId: string, cell: number, goalId: string) => void;
+  clearTile: (scheduleId: string, cell: number) => void;
+  setFocusedTile: (scheduleId: string, tileId: string | null) => void;
+  updateTileContent: (scheduleId: string, cell: number, patch: { title?: string; note?: string }) => void;
+  setTilePlan: (scheduleId: string, cell: number, plan: PlanStep[]) => void;
+  /** Pass `undefined` to clear. Instance-local — see `CardTileInstance.deadline`'s own
+   *  comment for why this never touches the underlying `Goal`. */
+  setTileDeadline: (scheduleId: string, cell: number, deadline: number | undefined) => void;
+
+  addReward: (scheduleId: string) => void;
+  editReward: (scheduleId: string, rewardId: string, patch: Partial<Reward>) => void;
+  removeReward: (scheduleId: string, rewardId: string) => void;
+  claimReward: (scheduleId: string, rewardId: string) => void;
 
   updateSettings: (patch: Partial<Settings>) => Promise<void>;
   resetAll: () => Promise<void>;
@@ -94,14 +104,55 @@ function cellForIndex(i: number): number {
   return i < CENTER ? i : i + 1;
 }
 
-function celebrationsFor(before: Card, after: Card): CelebrationPayload[] {
+/** The one place a `CardTileInstance` is built from a `Goal` — every field a tile needs
+ *  to display and play correctly without a live join back to the goal library. Used by
+ *  initial generation, successor creation, and `setTile`'s fill/swap, so the three can
+ *  never drift out of sync with each other about what "snapshotting a goal" means. */
+function snapshotTile(goal: Goal, cell: number, existingId?: string): CardTileInstance {
+  return {
+    id: existingId ?? uid('tile'),
+    cell,
+    goalId: goal.id,
+    title: goal.title,
+    emoji: goal.emoji,
+    note: goal.note,
+    category: goal.category,
+    bankId: goal.bankId,
+    difficulty: goal.difficulty,
+    type: goal.type,
+    target: goal.type === 'recurring' ? goal.recurringTarget : undefined,
+    progress: goal.type === 'recurring' ? 0 : undefined,
+  };
+}
+
+/** A schedule's one playable board at any moment is always its most recently created
+ *  instance — `instances` is append-only, so "current" is just "last". */
+function currentInstance(schedule: Schedule): CardInstance | undefined {
+  return schedule.instances[schedule.instances.length - 1];
+}
+
+/** Every per-instance mutator goes through this: find the schedule, find its current
+ *  instance, hand it to `fn`, write the result back. Mirrors the single-level
+ *  `st.cards.map(...)` pattern the old permanent-card model used, just one level deeper
+ *  now that a schedule owns a list of instances instead of being the playable thing
+ *  itself. */
+function updateCurrentInstance(st: AppState, scheduleId: string, fn: (instance: CardInstance) => CardInstance): AppState {
+  const schedule = st.schedules.find((s) => s.id === scheduleId);
+  const instance = schedule && currentInstance(schedule);
+  if (!schedule || !instance) return st;
+  const nextInstance = fn(instance);
+  const nextSchedule: Schedule = { ...schedule, instances: schedule.instances.map((i) => (i.id === instance.id ? nextInstance : i)) };
+  return { ...st, schedules: st.schedules.map((s) => (s.id === scheduleId ? nextSchedule : s)) };
+}
+
+function celebrationsFor(scheduleTitle: string, before: CardInstance, after: CardInstance): CelebrationPayload[] {
   const out: CelebrationPayload[] = [];
   const beforeLines = new Set(completedLines(before));
   const newLines = completedLines(after).filter((l) => !beforeLines.has(l));
   const justCompleted = !isCardComplete(before) && isCardComplete(after);
 
   if (justCompleted) {
-    out.push({ kind: 'card', cardName: after.title, tileCount: after.tiles.length, bingos: bingoCount(after) });
+    out.push({ kind: 'card', cardName: scheduleTitle, tileCount: after.tiles.length, bingos: bingoCount(after) });
   } else {
     for (const line of newLines) out.push({ kind: 'bingo', lineLabel: lineLabel(line) });
   }
@@ -111,7 +162,7 @@ function celebrationsFor(before: Card, after: Card): CelebrationPayload[] {
   if (FEATURES.rewards) {
     const beforeBingos = bingoCount(before);
     const afterBingos = bingoCount(after);
-    for (const rw of after.rewards) {
+    for (const rw of after.rewards ?? []) {
       if (rw.bingos > beforeBingos && rw.bingos <= afterBingos) {
         out.push({ kind: 'reward', bingos: rw.bingos, text: rw.text });
       }
@@ -120,22 +171,14 @@ function celebrationsFor(before: Card, after: Card): CelebrationPayload[] {
   return out;
 }
 
-function outcomeFor(before: Card, after: Card, crossed: boolean, uncrossed: boolean, bonus: boolean): TileOutcome {
+function outcomeFor(before: CardInstance, after: CardInstance, crossed: boolean, uncrossed: boolean, bonus: boolean): TileOutcome {
   const beforeLines = new Set(completedLines(before));
   const newBingoLines = completedLines(after).filter((l) => !beforeLines.has(l));
   const cardCompleted = !isCardComplete(before) && isCardComplete(after);
   const beforeBingos = bingoCount(before);
   const afterBingos = bingoCount(after);
-  const unlockedRewardIds = after.rewards.filter((r) => r.bingos > beforeBingos && r.bingos <= afterBingos).map((r) => r.id);
+  const unlockedRewardIds = (after.rewards ?? []).filter((r) => r.bingos > beforeBingos && r.bingos <= afterBingos).map((r) => r.id);
   return { crossed, uncrossed, bonus, newBingoLines, cardCompleted, unlockedRewardIds };
-}
-
-function defaultRewards(): Reward[] {
-  return [
-    { id: uid('rw'), bingos: 1, text: '' },
-    { id: uid('rw'), bingos: Math.round(MAX_BINGOS / 2), text: '' },
-    { id: uid('rw'), bingos: MAX_BINGOS, text: '' },
-  ];
 }
 
 // --- provider -----------------------------------------------------
@@ -170,55 +213,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let alive = true;
     (async () => {
       const loadedRaw = await repository.load();
-      // v4 → v5: the old shape had one `card: Card | null` instead of `cards: Card[]`.
-      // This is a real, lossless transform (unlike a version mismatch with no known
-      // shape), so — deliberately, see LocalRepository's key comment — the AsyncStorage
-      // key was NOT bumped for this change, specifically so this old data is still found
-      // here instead of being silently orphaned under an unreachable key.
-      let loaded: AppState | null = null;
-      if (loadedRaw) {
-        const raw = loadedRaw as unknown as
-          | AppState
-          | { schemaVersion: 4; card: Card | null; settings: AppState['settings']; log: AppState['log'] }
-          // The pre-multi-draft shape: one `draftCard: DraftCard | null` slot instead of
-          // `draftCards: DraftCard[]` — same "additive field changed shape" situation
-          // `draftCard` itself was added under, so it gets the same lossless, no-
-          // version-bump transform treatment below rather than a schema bump.
-          | (Omit<AppState, 'draftCards'> & { draftCard?: DraftCard | null });
-        if (raw.schemaVersion === SCHEMA_VERSION) {
-          loaded = raw as AppState;
-        } else if (raw.schemaVersion === 4 && 'card' in raw) {
-          loaded = {
-            schemaVersion: SCHEMA_VERSION,
-            cards: raw.card ? [{ ...raw.card, id: uid('card') }] : [],
-            draftCards: [],
-            settings: raw.settings,
-            log: raw.log,
-          };
-        }
-      }
-      // Merge onto DEFAULT_SETTINGS (not a bare pass-through) so a settings field added
-      // after some data was already persisted — same schemaVersion, just missing a key
-      // that didn't exist yet — backfills to its default instead of reading as
-      // `undefined` at every call site. `draftCards` gets an analogous backfill: either
-      // it's already a list (current shape), or this is pre-multi-draft data carrying the
-      // old singular `draftCard` key, wrapped into a one-item list, or neither existed yet
-      // at all (empty list) — covering both "field added later" and "field's shape
-      // changed later" with the same merge step.
-      const oldSingular = (loaded as unknown as { draftCard?: DraftCard | null } | null)?.draftCard;
-      const base = loaded
-        ? {
-            ...loaded,
-            draftCards: Array.isArray((loaded as AppState).draftCards)
-              ? (loaded as AppState).draftCards
-              : // Old single-slot data predates DraftCard.id entirely — mint one so this
-                // migrated entry is addressable by the new id-keyed saveDraftCard/
-                // clearDraftCard the same as any other draft.
-                oldSingular
-                ? [{ ...oldSingular, id: uid('draft') }]
-                : [],
-            settings: { ...DEFAULT_SETTINGS, ...loaded.settings },
-          }
+      const migrated = migrate(loadedRaw);
+      const base: AppState = migrated
+        ? { ...migrated, settings: { ...DEFAULT_SETTINGS, ...migrated.settings } }
         : emptyState();
       if (!alive) return;
       commitState(base);
@@ -263,112 +260,152 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSoundEnabled(state.settings.soundEnabled);
   }, [state.settings.hapticsEnabled, state.settings.soundEnabled]);
 
-  // foreground: keep notifications in sync
+  // foreground: keep notifications and every schedule's current period in sync
   useEffect(() => {
-    const handle = () => void reconcileNotifications(stateRef.current);
+    const handle = () => {
+      void reconcileNotifications(stateRef.current);
+      advanceSchedules();
+    };
     handle();
     const sub = RNAppState.addEventListener('change', (st) => st === 'active' && handle());
     return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
-  // --- card creation ---
-  const createCard = useCallback(
-    (kept: TileSeed[], title: string, emoji?: string, intent?: string) => {
-      const s = stateRef.current;
-      const tiles: Tile[] = kept.slice(0, 24).map((seed, i) => ({
-        id: uid('tile'),
-        cell: cellForIndex(i),
-        label: seed.label,
-        emoji: seed.emoji,
-        note: seed.note,
-        category: seed.category,
-        bankId: seed.bankId,
-      }));
-      const card: Card = {
-        id: uid('card'),
-        title: title.trim() || `My ${new Date().getFullYear()} Card`,
-        emoji: emoji?.trim() || undefined,
-        intent: intent?.trim() || undefined,
-        year: new Date().getFullYear(),
-        createdAt: Date.now(),
-        tiles,
-        rewards: defaultRewards(),
-      };
-      // Newest first — the dashboard shows `cards` in this order with no separate sort.
-      commitState({ ...s, cards: [card, ...s.cards], log: log(s, 'card', 'Card built') });
-    },
-    [commitState]
-  );
-
-  const renameCard = useCallback((cardId: string, title: string) => {
-    setState((st) => ({
-      ...st,
-      cards: st.cards.map((c) => (c.id === cardId ? { ...c, title: title.trim() || c.title } : c)),
-    }));
+  // Finalizes any schedule whose current instance has ended and, for repeating
+  // schedules, creates exactly one successor at whatever period `now` currently resolves
+  // to — never a backfilled stack, however many periods were missed (see schedule.ts's
+  // own module comment for why this is idempotent regardless of how long the app was
+  // closed). Rollover is 0/off in this stage — the next instance's goals always start
+  // fresh; Stage 2 reads `predecessorInstanceId` to offer carrying some forward.
+  const advanceSchedules = useCallback(() => {
+    const now = Date.now();
+    setState((st) => {
+      let changed = false;
+      const nextSchedules = st.schedules.map((schedule) => {
+        const instance = currentInstance(schedule);
+        if (!instance || instance.lifecycleState !== 'active' || now < instance.end) return schedule;
+        changed = true;
+        const finalizedInstance: CardInstance = { ...instance, lifecycleState: 'finalized' };
+        if (!schedule.repeat) {
+          return { ...schedule, instances: [...schedule.instances.slice(0, -1), finalizedInstance], lifecycleState: 'ended' as const };
+        }
+        const period = nextPeriod(schedule, instance.periodIndex);
+        const goalIds = instance.tiles.map((t) => t.goalId);
+        const goals = goalIds.map((id) => st.goals.find((g) => g.id === id)).filter((g): g is Goal => !!g);
+        const placementGoals: PlacementGoal[] = goals.map((g) => ({ id: g.id, difficulty: g.difficulty }));
+        const seed = `${schedule.id}:${period.index}`;
+        const placed = placeTiles(placementGoals, seed);
+        const cellByGoalId = placed.ok ? placed.cellByGoalId : {};
+        const newInstance: CardInstance = {
+          id: uid('inst'),
+          scheduleId: schedule.id,
+          periodIndex: period.index,
+          start: period.start,
+          end: period.end,
+          createdAt: now,
+          placementSeed: seed,
+          predecessorInstanceId: instance.id,
+          swapUsed: false,
+          lifecycleState: 'active',
+          tiles: goals.map((g) => snapshotTile(g, cellByGoalId[g.id] ?? 0)),
+        };
+        return { ...schedule, instances: [...schedule.instances.slice(0, -1), finalizedInstance, newInstance] };
+      });
+      return changed ? { ...st, schedules: nextSchedules } : st;
+    });
   }, []);
 
-  const setCardEmoji = useCallback((cardId: string, emoji: string) => {
+  // --- goal library ---
+  const createGoal = useCallback((input: GoalInput): Goal => {
+    const goal: Goal = { id: uid('goal'), createdAt: Date.now(), ...input };
+    setState((st) => ({ ...st, goals: [goal, ...st.goals] }));
+    return goal;
+  }, []);
+
+  const updateGoal = useCallback((goalId: string, patch: Partial<GoalInput>) => {
+    setState((st) => ({ ...st, goals: st.goals.map((g) => (g.id === goalId ? { ...g, ...patch } : g)) }));
+  }, []);
+
+  const archiveGoal = useCallback((goalId: string) => {
+    setState((st) => ({ ...st, goals: st.goals.map((g) => (g.id === goalId ? { ...g, archivedAt: Date.now() } : g)) }));
+  }, []);
+
+  // --- schedules ---
+  const createSchedule = useCallback((definition: ScheduleDefinition, goalIds: string[]): CreateScheduleResult => {
+    const s = stateRef.current;
+    const goals = goalIds.map((id) => s.goals.find((g) => g.id === id)).filter((g): g is Goal => !!g);
+    const placementGoals: PlacementGoal[] = goals.map((g) => ({ id: g.id, difficulty: g.difficulty }));
+    const scheduleId = uid('sched');
+    const seed = `${scheduleId}:0`;
+    const placed = placeTiles(placementGoals, seed);
+    if (!placed.ok) return { ok: false, conflictingLines: placed.conflictingLines };
+
+    const now = Date.now();
+    const pending: CardSchedule = { ...definition, id: scheduleId, createdAt: now, lifecycleState: 'active' };
+    const tiles: CardTileInstance[] = goals.map((g) => snapshotTile(g, placed.cellByGoalId[g.id]));
+    const instance: CardInstance = {
+      id: uid('inst'),
+      scheduleId,
+      periodIndex: 0,
+      start: boundaryForIndex(pending, 0),
+      end: boundaryForIndex(pending, 1),
+      createdAt: now,
+      placementSeed: seed,
+      tiles,
+      swapUsed: false,
+      lifecycleState: 'active',
+    };
+    const schedule: Schedule = { ...pending, instances: [instance] };
+    commitState({ ...s, schedules: [schedule, ...s.schedules], log: log(s, 'card', `Created "${definition.title}"`) });
+    return { ok: true, scheduleId };
+  }, [commitState]);
+
+  const renameSchedule = useCallback((scheduleId: string, title: string) => {
     setState((st) => ({
       ...st,
-      cards: st.cards.map((c) => (c.id === cardId ? { ...c, emoji: emoji.trim() || undefined } : c)),
+      schedules: st.schedules.map((sc) => (sc.id === scheduleId ? { ...sc, title: title.trim() || sc.title } : sc)),
     }));
   }, []);
 
   // Permanent and irreversible on this device — CardDetailScreen is the one place this is
   // reachable, and only behind its own confirmation dialog, matching how every other
   // genuinely destructive action in this app (resetAll) requires an explicit confirm.
-  const deleteCard = useCallback((cardId: string) => {
+  const deleteSchedule = useCallback((scheduleId: string) => {
     setState((st) => {
-      const card = st.cards.find((c) => c.id === cardId);
-      if (!card) return st;
-      return { ...st, cards: st.cards.filter((c) => c.id !== cardId), log: log(st, 'card', `Deleted "${card.title}"`) };
+      const schedule = st.schedules.find((sc) => sc.id === scheduleId);
+      if (!schedule) return st;
+      return { ...st, schedules: st.schedules.filter((sc) => sc.id !== scheduleId), log: log(st, 'card', `Deleted "${schedule.title}"`) };
     });
   }, []);
 
-  // Randomly reassigns which (already-filled) cell each existing tile sits in — an
-  // alternative to manually dragging tiles around one at a time, since this app has no
-  // drag-to-rearrange gesture. Only permutes among cells that already have a tile; empty
-  // cells stay empty and the count of filled cells never changes. Repeatable as many
-  // times as the user likes — each call is an independent fresh shuffle, not a toggle.
-  const shuffleCard = useCallback((cardId: string) => {
-    setState((st) => {
-      const card = st.cards.find((c) => c.id === cardId);
-      if (!card) return st;
-      const cells = card.tiles.map((t) => t.cell);
-      for (let i = cells.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [cells[i], cells[j]] = [cells[j], cells[i]];
-      }
-      const nextCard = { ...card, tiles: card.tiles.map((t, i) => ({ ...t, cell: cells[i] })) };
-      return { ...st, cards: st.cards.map((c) => (c.id === cardId ? nextCard : c)) };
-    });
-  }, []);
-
-  // --- draft cards (any number of in-progress swipe-deck sessions, paused/resumed/
-  // researching independently of each other — see DraftCard's own comment for why this
-  // is a list, not a single slot) ---
-  const saveDraftCard = useCallback(
-    (
-      draftId: string,
-      kept: DraftCardTile[],
-      rejected: DraftCardTile[],
-      usedSecondPass: boolean,
-      extra?: { title?: string; pool?: DraftCardTile[]; intent?: string; source?: 'bank' | 'ai' | 'custom'; generating?: boolean; genError?: string }
-    ) => {
-      setState((st) => {
-        const next: DraftCard = { id: draftId, kept, rejected, usedSecondPass, ...extra };
-        const exists = st.draftCards.some((d) => d.id === draftId);
-        return {
-          ...st,
-          draftCards: exists ? st.draftCards.map((d) => (d.id === draftId ? next : d)) : [...st.draftCards, next],
-        };
-      });
-    },
-    []
-  );
-
-  const clearDraftCard = useCallback((draftId: string) => {
-    setState((st) => ({ ...st, draftCards: st.draftCards.filter((d) => d.id !== draftId) }));
+  // Randomly reassigns which (already-filled) cell each existing tile sits in, same as
+  // before, but now re-validated against the <=2-Hard-per-line constraint (placement.ts's
+  // `conflictingLines`) on every attempt, bounded the same way initial placement is —
+  // goals carry real difficulty now, so a free Fisher–Yates could otherwise reintroduce 3
+  // Hard tiles on one line.
+  const shuffleCurrentInstance = useCallback((scheduleId: string) => {
+    setState((st) =>
+      updateCurrentInstance(st, scheduleId, (instance) => {
+        const placementGoals: PlacementGoal[] = instance.tiles.map((t) => ({ id: t.id, difficulty: t.difficulty }));
+        const cells = instance.tiles.map((t) => t.cell);
+        let best = cells;
+        for (let attempt = 0; attempt < 250; attempt++) {
+          const shuffled = [...cells];
+          for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+          }
+          const assignment: Record<string, number> = {};
+          instance.tiles.forEach((t, i) => (assignment[t.id] = shuffled[i]));
+          if (conflictingLines(assignment, placementGoals).length === 0) {
+            best = shuffled;
+            break;
+          }
+        }
+        return { ...instance, tiles: instance.tiles.map((t, i) => ({ ...t, cell: best[i] })) };
+      })
+    );
   }, []);
 
   // --- tile interaction ---
@@ -382,161 +419,153 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [commitState]
   );
 
+  /** One-off tiles toggle done/not-done, same as always. Recurring tiles instead
+   *  increment progress toward their target on each tap (crossing off automatically once
+   *  target is reached); tapping an already-done recurring tile resets it to zero rather
+   *  than decrementing by one, since "undo the whole thing" reads clearer than "undo my
+   *  last tap" once it's already been celebrated as complete. */
   const pressTile = useCallback(
-    (cardId: string, cell: number): TileOutcome => {
+    (scheduleId: string, cell: number): TileOutcome => {
       const s = stateRef.current;
-      const card = s.cards.find((c) => c.id === cardId);
-      const tile = card?.tiles.find((t) => t.cell === cell);
-      if (!card || !tile) return EMPTY_TILE_OUTCOME;
+      const schedule = s.schedules.find((sc) => sc.id === scheduleId);
+      const instance = schedule && currentInstance(schedule);
+      const tile = instance?.tiles.find((t) => t.cell === cell);
+      if (!schedule || !instance || !tile) return EMPTY_TILE_OUTCOME;
 
-      const willCross = !tile.doneAt;
-      const { before, after } = commit((st) => {
-        const stCard = st.cards.find((c) => c.id === cardId);
-        if (!stCard) return st;
-        const nextCard: Card = {
-          ...stCard,
-          tiles: stCard.tiles.map((t) => (t.id === tile.id ? { ...t, doneAt: willCross ? Date.now() : undefined } : t)),
-          // Crossing off the focused tile clears the focus — nothing left to steer toward.
-          focusedTileId: willCross && stCard.focusedTileId === tile.id ? undefined : stCard.focusedTileId,
-        };
-        const nextCards = st.cards.map((c) => (c.id === cardId ? nextCard : c));
-        return willCross
-          ? { ...st, cards: nextCards, log: log(st, 'tile', `Crossed off "${tile.label}"`) }
-          : { ...st, cards: nextCards };
-      });
-      const beforeCard = before.cards.find((c) => c.id === cardId);
-      const afterCard = after.cards.find((c) => c.id === cardId);
-      if (!beforeCard || !afterCard) return EMPTY_TILE_OUTCOME;
-      enqueue(celebrationsFor(beforeCard, afterCard));
-      return outcomeFor(beforeCard, afterCard, willCross, !willCross, willCross && bonusFor(tile.id));
+      const wasCrossed = isDone(tile);
+      const { before, after } = commit((st) =>
+        updateCurrentInstance(st, scheduleId, (inst) => {
+          const nextTiles = inst.tiles.map((t) => (t.id === tile.id ? advanceTile(t) : t));
+          const nextInst = {
+            ...inst,
+            tiles: nextTiles,
+            focusedTileId: isDone(nextTiles.find((t) => t.id === tile.id)) && inst.focusedTileId === tile.id ? undefined : inst.focusedTileId,
+          };
+          return nextInst;
+        })
+      );
+      const beforeInstance = before.schedules.find((sc) => sc.id === scheduleId) && currentInstance(before.schedules.find((sc) => sc.id === scheduleId)!);
+      const afterInstance = after.schedules.find((sc) => sc.id === scheduleId) && currentInstance(after.schedules.find((sc) => sc.id === scheduleId)!);
+      if (!beforeInstance || !afterInstance) return EMPTY_TILE_OUTCOME;
+      const nowCrossed = isDone(afterInstance.tiles.find((t) => t.id === tile.id));
+      if (nowCrossed && !wasCrossed) {
+        commitState({ ...after, log: log(after, 'tile', `Crossed off "${tile.title}"`) });
+      }
+      enqueue(celebrationsFor(schedule.title, beforeInstance, afterInstance));
+      return outcomeFor(beforeInstance, afterInstance, nowCrossed && !wasCrossed, wasCrossed && !nowCrossed, nowCrossed && !wasCrossed && bonusFor(tile.id));
     },
-    [commit, enqueue]
+    [commit, commitState, enqueue]
   );
 
-  const setTileDone = useCallback(
-    (cardId: string, cell: number, done: boolean) => {
-      const card = stateRef.current.cards.find((c) => c.id === cardId);
-      const tile = card?.tiles.find((t) => t.cell === cell);
-      if (!card || !tile) return;
-      const { before, after } = commit((st) => {
-        const stCard = st.cards.find((c) => c.id === cardId);
-        if (!stCard) return st;
-        const nextCard: Card = {
-          ...stCard,
-          tiles: stCard.tiles.map((t) => (t.id === tile.id ? { ...t, doneAt: done ? Date.now() : undefined } : t)),
-          focusedTileId: done && stCard.focusedTileId === tile.id ? undefined : stCard.focusedTileId,
-        };
-        const nextCards = st.cards.map((c) => (c.id === cardId ? nextCard : c));
-        return done ? { ...st, cards: nextCards, log: log(st, 'tile', `Crossed off "${tile.label}"`) } : { ...st, cards: nextCards };
-      });
-      const beforeCard = before.cards.find((c) => c.id === cardId);
-      const afterCard = after.cards.find((c) => c.id === cardId);
-      if (beforeCard && afterCard) enqueue(celebrationsFor(beforeCard, afterCard));
-    },
-    [commit, enqueue]
-  );
-
-  const setTile = useCallback((cardId: string, cell: number, seed: TileSeed) => {
+  const setTile = useCallback((scheduleId: string, cell: number, goalId: string) => {
     if (cell === CENTER) return;
     setState((st) => {
-      const stCard = st.cards.find((c) => c.id === cardId);
-      if (!stCard) return st;
-      const existing = stCard.tiles.find((t) => t.cell === cell);
-      const tile: Tile = {
-        id: existing?.id ?? uid('tile'),
-        cell,
-        label: seed.label,
-        emoji: seed.emoji,
-        note: seed.note,
-        category: seed.category,
-        bankId: seed.bankId,
-      };
-      const tiles = existing ? stCard.tiles.map((t) => (t.id === existing.id ? tile : t)) : [...stCard.tiles, tile].sort((a, b) => a.cell - b.cell);
-      return { ...st, cards: st.cards.map((c) => (c.id === cardId ? { ...stCard, tiles } : c)) };
+      const goal = st.goals.find((g) => g.id === goalId);
+      if (!goal) return st;
+      return updateCurrentInstance(st, scheduleId, (instance) => {
+        const existing = instance.tiles.find((t) => t.cell === cell);
+        const tile = snapshotTile(goal, cell, existing?.id);
+        const tiles = existing
+          ? instance.tiles.map((t) => (t.id === existing.id ? tile : t))
+          : [...instance.tiles, tile].sort((a, b) => a.cell - b.cell);
+        return { ...instance, tiles };
+      });
     });
   }, []);
 
-  const clearTile = useCallback((cardId: string, cell: number) => {
-    setState((st) => {
-      const stCard = st.cards.find((c) => c.id === cardId);
-      if (!stCard) return st;
-      const tiles = stCard.tiles.filter((t) => t.cell !== cell);
-      const removed = stCard.tiles.find((t) => t.cell === cell);
-      const focusedTileId = removed && stCard.focusedTileId === removed.id ? undefined : stCard.focusedTileId;
-      return { ...st, cards: st.cards.map((c) => (c.id === cardId ? { ...stCard, tiles, focusedTileId } : c)) };
-    });
+  const clearTile = useCallback((scheduleId: string, cell: number) => {
+    setState((st) =>
+      updateCurrentInstance(st, scheduleId, (instance) => {
+        const removed = instance.tiles.find((t) => t.cell === cell);
+        const tiles = instance.tiles.filter((t) => t.cell !== cell);
+        const focusedTileId = removed && instance.focusedTileId === removed.id ? undefined : instance.focusedTileId;
+        return { ...instance, tiles, focusedTileId };
+      })
+    );
   }, []);
 
-  /** Pass `null` to clear focus. Only ever one tile focused at a time per card — setting
-   *  a new one replaces whatever was focused before, matching "pick the one thing to
-   *  work toward" rather than a growing list. */
-  const setFocusedTile = useCallback((cardId: string, tileId: string | null) => {
-    setState((st) => ({
-      ...st,
-      cards: st.cards.map((c) => (c.id === cardId ? { ...c, focusedTileId: tileId ?? undefined } : c)),
-    }));
+  /** Pass `null` to clear focus. Only ever one tile focused at a time per instance —
+   *  setting a new one replaces whatever was focused before, matching "pick the one
+   *  thing to work toward" rather than a growing list. */
+  const setFocusedTile = useCallback((scheduleId: string, tileId: string | null) => {
+    setState((st) => updateCurrentInstance(st, scheduleId, (instance) => ({ ...instance, focusedTileId: tileId ?? undefined })));
   }, []);
 
-  /** A narrow patch for TileEditScreen's "Save changes" — deliberately NOT built on
-   *  `setTile`, which fully reconstructs a Tile from a TileSeed and would silently drop
-   *  any field not in that shape (doneAt, plan, ...). This spreads the existing tile
-   *  first so everything except label/note is preserved untouched. */
-  const updateTileContent = useCallback((cardId: string, cell: number, patch: { label?: string; note?: string }) => {
-    setState((st) => {
-      const stCard = st.cards.find((c) => c.id === cardId);
-      const existing = stCard?.tiles.find((t) => t.cell === cell);
-      if (!stCard || !existing) return st;
-      const tile: Tile = { ...existing, label: patch.label?.trim() || existing.label, note: patch.note };
-      const tiles = stCard.tiles.map((t) => (t.id === existing.id ? tile : t));
-      return { ...st, cards: st.cards.map((c) => (c.id === cardId ? { ...stCard, tiles } : c)) };
-    });
+  /** A narrow patch for TileEditScreen's "Save changes" — only overwrites the tile's own
+   *  snapshot (title/note), never the underlying Goal (which may be reused by other
+   *  schedules/future instances — editing one card's tile shouldn't retroactively rename
+   *  it everywhere). Deliberately NOT built on `setTile`, which re-snapshots from a Goal
+   *  and would silently drop any field not carried by that snapshot (doneAt, progress,
+   *  plan...). */
+  const updateTileContent = useCallback((scheduleId: string, cell: number, patch: { title?: string; note?: string }) => {
+    setState((st) =>
+      updateCurrentInstance(st, scheduleId, (instance) => {
+        const existing = instance.tiles.find((t) => t.cell === cell);
+        if (!existing) return instance;
+        const tile: CardTileInstance = { ...existing, title: patch.title?.trim() || existing.title, note: patch.note };
+        return { ...instance, tiles: instance.tiles.map((t) => (t.id === existing.id ? tile : t)) };
+      })
+    );
   }, []);
 
   /** Replaces a tile's whole plan — the caller (TileEditScreen) always passes the full
    *  next array (add/edit/delete/toggle-done all compute the next array client-side and
    *  hand it back whole), same convention `setTile` and friends already use. */
-  const setTilePlan = useCallback((cardId: string, cell: number, plan: PlanStep[]) => {
-    setState((st) => {
-      const stCard = st.cards.find((c) => c.id === cardId);
-      const existing = stCard?.tiles.find((t) => t.cell === cell);
-      if (!stCard || !existing) return st;
-      const tiles = stCard.tiles.map((t) => (t.id === existing.id ? { ...t, plan } : t));
-      return { ...st, cards: st.cards.map((c) => (c.id === cardId ? { ...stCard, tiles } : c)) };
-    });
+  const setTilePlan = useCallback((scheduleId: string, cell: number, plan: PlanStep[]) => {
+    setState((st) =>
+      updateCurrentInstance(st, scheduleId, (instance) => {
+        const existing = instance.tiles.find((t) => t.cell === cell);
+        if (!existing) return instance;
+        return { ...instance, tiles: instance.tiles.map((t) => (t.id === existing.id ? { ...t, plan } : t)) };
+      })
+    );
   }, []);
 
-  // --- rewards ---
-  const addReward = useCallback((cardId: string) => {
+  const setTileDeadline = useCallback((scheduleId: string, cell: number, deadline: number | undefined) => {
+    setState((st) =>
+      updateCurrentInstance(st, scheduleId, (instance) => {
+        const existing = instance.tiles.find((t) => t.cell === cell);
+        if (!existing) return instance;
+        return { ...instance, tiles: instance.tiles.map((t) => (t.id === existing.id ? { ...t, deadline } : t)) };
+      })
+    );
+  }, []);
+
+  // --- rewards (legacy/decorative — see CardInstance.rewards; Stage 2 reshapes this into
+  // the real tier system, this just keeps the hidden-behind-FEATURES.rewards screen from
+  // crashing against the new optional field in the meantime) ---
+  const addReward = useCallback((scheduleId: string) => {
+    setState((st) =>
+      updateCurrentInstance(st, scheduleId, (instance) => {
+        const rewards = instance.rewards ?? [];
+        const max = rewards.reduce((m, r) => Math.max(m, r.bingos), 0);
+        return { ...instance, rewards: [...rewards, { id: uid('rw'), bingos: Math.min(MAX_BINGOS, max + 1), text: '' }] };
+      })
+    );
+  }, []);
+  const editReward = useCallback((scheduleId: string, rewardId: string, patch: Partial<Reward>) => {
+    setState((st) =>
+      updateCurrentInstance(st, scheduleId, (instance) => ({
+        ...instance,
+        rewards: (instance.rewards ?? []).map((r) => (r.id === rewardId ? { ...r, ...patch } : r)),
+      }))
+    );
+  }, []);
+  const removeReward = useCallback((scheduleId: string, rewardId: string) => {
+    setState((st) =>
+      updateCurrentInstance(st, scheduleId, (instance) => ({ ...instance, rewards: (instance.rewards ?? []).filter((r) => r.id !== rewardId) }))
+    );
+  }, []);
+  const claimReward = useCallback((scheduleId: string, rewardId: string) => {
     setState((st) => {
-      const stCard = st.cards.find((c) => c.id === cardId);
-      if (!stCard) return st;
-      const max = stCard.rewards.reduce((m, r) => Math.max(m, r.bingos), 0);
-      const nextCard = { ...stCard, rewards: [...stCard.rewards, { id: uid('rw'), bingos: Math.min(MAX_BINGOS, max + 1), text: '' }] };
-      return { ...st, cards: st.cards.map((c) => (c.id === cardId ? nextCard : c)) };
-    });
-  }, []);
-  const editReward = useCallback((cardId: string, rewardId: string, patch: Partial<Reward>) => {
-    setState((st) => ({
-      ...st,
-      cards: st.cards.map((c) =>
-        c.id === cardId ? { ...c, rewards: c.rewards.map((r) => (r.id === rewardId ? { ...r, ...patch } : r)) } : c
-      ),
-    }));
-  }, []);
-  const removeReward = useCallback((cardId: string, rewardId: string) => {
-    setState((st) => ({
-      ...st,
-      cards: st.cards.map((c) => (c.id === cardId ? { ...c, rewards: c.rewards.filter((r) => r.id !== rewardId) } : c)),
-    }));
-  }, []);
-  const claimReward = useCallback((cardId: string, rewardId: string) => {
-    setState((st) => {
-      const stCard = st.cards.find((c) => c.id === cardId);
-      if (!stCard) return st;
-      const rw = stCard.rewards.find((r) => r.id === rewardId);
-      const nextCard = { ...stCard, rewards: stCard.rewards.map((r) => (r.id === rewardId ? { ...r, claimedAt: Date.now() } : r)) };
-      const nextCards = st.cards.map((c) => (c.id === cardId ? nextCard : c));
-      return rw ? { ...st, cards: nextCards, log: log(st, 'reward', `Claimed: ${rw.text || `${rw.bingos}-bingo reward`}`) } : { ...st, cards: nextCards };
+      const schedule = st.schedules.find((sc) => sc.id === scheduleId);
+      const instance = schedule && currentInstance(schedule);
+      const rw = instance?.rewards?.find((r) => r.id === rewardId);
+      const next = updateCurrentInstance(st, scheduleId, (inst) => ({
+        ...inst,
+        rewards: (inst.rewards ?? []).map((r) => (r.id === rewardId ? { ...r, claimedAt: Date.now() } : r)),
+      }));
+      return rw ? { ...next, log: log(next, 'reward', `Claimed: ${rw.text || `${rw.bingos}-bingo reward`}`) } : next;
     });
   }, []);
 
@@ -564,20 +593,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       celebration: queue[0] ?? null,
       dismissCelebration,
       syncStatus,
-      createCard,
-      renameCard,
-      setCardEmoji,
-      deleteCard,
-      shuffleCard,
-      saveDraftCard,
-      clearDraftCard,
+      createGoal,
+      updateGoal,
+      archiveGoal,
+      createSchedule,
+      renameSchedule,
+      deleteSchedule,
+      shuffleCurrentInstance,
       pressTile,
-      setTileDone,
       setTile,
       clearTile,
       setFocusedTile,
       updateTileContent,
       setTilePlan,
+      setTileDeadline,
       addReward,
       editReward,
       removeReward,
@@ -591,20 +620,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       queue,
       dismissCelebration,
       syncStatus,
-      createCard,
-      renameCard,
-      setCardEmoji,
-      deleteCard,
-      shuffleCard,
-      saveDraftCard,
-      clearDraftCard,
+      createGoal,
+      updateGoal,
+      archiveGoal,
+      createSchedule,
+      renameSchedule,
+      deleteSchedule,
+      shuffleCurrentInstance,
       pressTile,
-      setTileDone,
       setTile,
       clearTile,
       setFocusedTile,
       updateTileContent,
       setTilePlan,
+      setTileDeadline,
       addReward,
       editReward,
       removeReward,
@@ -617,8 +646,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
 }
 
+function isDone(tile: CardTileInstance | undefined): boolean {
+  return !!tile?.doneAt;
+}
+
+/** The actual tap-handling rule for `pressTile`, factored out since it's pure and
+ *  `pressTile` itself is already deep in `commit`/`updateCurrentInstance` nesting. */
+function advanceTile(tile: CardTileInstance): CardTileInstance {
+  if (tile.type !== 'recurring') {
+    return { ...tile, doneAt: tile.doneAt ? undefined : Date.now() };
+  }
+  const target = tile.target ?? 1;
+  if (!tile.doneAt) {
+    const progress = Math.min(target, (tile.progress ?? 0) + 1);
+    return { ...tile, progress, doneAt: progress >= target ? Date.now() : undefined };
+  }
+  return { ...tile, progress: 0, doneAt: undefined };
+}
+
 export function useApp(): AppApi {
   const v = useContext(Ctx);
   if (!v) throw new Error('useApp must be used inside <AppProvider>');
   return v;
 }
+
+// Re-exported so screens that only need the shape (not the live context) can import from
+// one place — matches how `TileSeed` used to live here before Stage 1.
+export type { TimelineMode };

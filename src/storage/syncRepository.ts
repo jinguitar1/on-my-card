@@ -1,5 +1,6 @@
 import { SCHEMA_VERSION, type AppState } from '../domain/types';
 import { LocalRepository } from './localRepository';
+import { migrate } from './migrations';
 import { deleteRow, fetchRow, upsertRow } from './remoteRepository';
 import type { Repository } from './repository';
 
@@ -68,17 +69,28 @@ export class SyncRepository implements Repository {
         this.markSynced();
         return null;
       }
+      let remoteState = remote.state;
       if (remote.schemaVersion !== SCHEMA_VERSION) {
-        // An incompatible remote shape — don't adopt it, but don't overwrite it
-        // blindly either; the next local save will upsert once local is current.
-        this.setError('Remote data is from a different app version');
-        return null;
+        // A remote row from an older schema (a second device, or a reinstall syncing
+        // before this device has ever written the current schema) used to be rejected
+        // outright with a user-facing error here. It gets the same lossless migration
+        // local hydrate always has instead — `migrate()` is the one shared entry point
+        // both call, so the two paths can't drift apart.
+        const migrated = migrate(remote.state);
+        if (!migrated) {
+          // Only a genuinely unrecognized/future shape falls through to this — nothing
+          // to transform, so don't adopt it, but don't overwrite it blindly either; the
+          // next local save upserts once local is current.
+          this.setError('Remote data is from a different app version');
+          return null;
+        }
+        remoteState = migrated;
       }
       const localUpdatedAt = await this.local.getUpdatedAt();
       if (remote.updatedAtMs > localUpdatedAt) {
-        await this.local.save(remote.state);
+        await this.local.save(remoteState);
         this.markSynced();
-        return remote.state;
+        return remoteState;
       }
       const local = await this.local.load();
       if (local) await upsertRow(this.userId, local);

@@ -33,17 +33,20 @@ function IdentityLine({ text }: { text: string }) {
 export default function RewardsScreen() {
   const { state, addReward, editReward, removeReward, claimReward } = useApp();
   const sound = useSound();
-  // Still behind FEATURES.rewards (unreachable) — picks the first card as a placeholder
-  // rather than adding a card-picker UI, since proper multi-card support for this screen
-  // is out of scope while the rewards feature itself is still deferred.
-  const card = state.cards[0];
+  // Still behind FEATURES.rewards (unreachable) — picks the first schedule as a
+  // placeholder rather than adding a schedule-picker UI, since proper multi-schedule
+  // support for this screen is out of scope while the rewards feature itself is still
+  // deferred (and gets properly redesigned around the real tier system in Stage 2).
+  const schedule = state.schedules[0];
+  const scheduleId = schedule?.id;
+  const card = schedule?.instances[schedule.instances.length - 1];
 
   const [editId, setEditId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [draftBingos, setDraftBingos] = useState('1');
   const [justClaimed, setJustClaimed] = useState<{ id: string; line: string } | null>(null);
 
-  if (!card) return null;
+  if (!card || !scheduleId) return null;
 
   const rewards = sortedRewards(card);
   const bingos = bingoCount(card);
@@ -54,7 +57,7 @@ export default function RewardsScreen() {
     setDraftBingos(String(b));
   };
   const commitEdit = () => {
-    if (editId) editReward(card.id, editId, { text: draft.trim(), bingos: Math.max(1, Math.min(MAX_BINGOS, parseInt(draftBingos, 10) || 1)) });
+    if (editId) editReward(scheduleId, editId, { text: draft.trim(), bingos: Math.max(1, Math.min(MAX_BINGOS, parseInt(draftBingos, 10) || 1)) });
     setEditId(null);
   };
 
@@ -94,7 +97,7 @@ export default function RewardsScreen() {
                         autoFocus
                       />
                       <View style={styles.editBtns}>
-                        <GhostButton danger label="Delete" onPress={() => { removeReward(card.id, r.id); setEditId(null); }} style={{ flex: 1 }} />
+                        <GhostButton danger label="Delete" onPress={() => { removeReward(scheduleId, r.id); setEditId(null); }} style={{ flex: 1 }} />
                         <PrimaryButton label="Done" onPress={commitEdit} style={{ flex: 2 }} />
                       </View>
                     </View>
@@ -106,7 +109,7 @@ export default function RewardsScreen() {
                         state={st}
                         onEdit={() => beginEdit(r.id, r.text, r.bingos)}
                         onClaim={() => {
-                          claimReward(card.id, r.id);
+                          claimReward(scheduleId, r.id);
                           rewardHit();
                           sound.play('fanfare');
                           const line = randomIdentityLine();
@@ -123,7 +126,7 @@ export default function RewardsScreen() {
           </View>
 
           {rewards.length < MAX_BINGOS && (
-            <Pressable style={styles.addRung} onPress={() => addReward(card.id)}>
+            <Pressable style={styles.addRung} onPress={() => addReward(scheduleId)}>
               <Text style={styles.addRungText}>＋ Add a rung</Text>
             </Pressable>
           )}

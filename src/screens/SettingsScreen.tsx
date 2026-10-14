@@ -57,7 +57,7 @@ interface SettingsDraft {
 }
 
 export default function SettingsScreen({ navigation }: any) {
-  const { state, updateSettings, resetAll, syncStatus, setTileDone, setFocusedTile } = useApp();
+  const { state, updateSettings, resetAll, syncStatus, pressTile, setFocusedTile } = useApp();
   const { status: authStatus, session, signOut, setPassword } = useAuth();
   const s = state.settings;
 
@@ -216,27 +216,29 @@ export default function SettingsScreen({ navigation }: any) {
 
   // Dev-only test-data shortcuts (below, gated on __DEV__) — for quickly populating
   // realistic card states while testing AI coaching / the radar chart / focus mode,
-  // instead of hand-tapping a dozen tiles every time. Operate on the first card as a
-  // fixed, simple target — there's no "current card" concept in global state (which
-  // card is open is purely a navigation-time param), so these just need *a* card, not
-  // necessarily whichever one the user happens to be looking at.
-  const devCard = state.cards[0];
+  // instead of hand-tapping a dozen tiles every time. Operate on the first schedule's
+  // current instance as a fixed, simple target — there's no "current card" concept in
+  // global state (which card is open is purely a navigation-time param), so these just
+  // need *a* card, not necessarily whichever one the user happens to be looking at.
+  const devSchedule = state.schedules[0];
+  const devScheduleId = devSchedule?.id;
+  const devCard = devSchedule?.instances[devSchedule.instances.length - 1];
   const randomizeProgress = () => {
-    if (!devCard) return;
+    if (!devCard || !devScheduleId) return;
     const open = devCard.tiles.filter((t) => !t.doneAt);
     const count = Math.min(open.length, 3 + Math.floor(Math.random() * 12));
     const shuffled = [...open].sort(() => Math.random() - 0.5);
-    shuffled.slice(0, count).forEach((t) => setTileDone(devCard.id, t.cell, true));
+    shuffled.slice(0, count).forEach((t) => pressTile(devScheduleId, t.cell));
   };
   const focusRandomOpenTile = () => {
-    if (!devCard) return;
+    if (!devCard || !devScheduleId) return;
     const open = devCard.tiles.filter((t) => !t.doneAt);
     if (open.length === 0) return;
-    setFocusedTile(devCard.id, open[Math.floor(Math.random() * open.length)].id);
+    setFocusedTile(devScheduleId, open[Math.floor(Math.random() * open.length)].id);
   };
   const uncrossEverything = () => {
-    if (!devCard) return;
-    devCard.tiles.filter((t) => t.doneAt).forEach((t) => setTileDone(devCard.id, t.cell, false));
+    if (!devCard || !devScheduleId) return;
+    devCard.tiles.filter((t) => t.doneAt).forEach((t) => pressTile(devScheduleId, t.cell));
   };
 
   return (

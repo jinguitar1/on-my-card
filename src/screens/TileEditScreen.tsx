@@ -1,14 +1,21 @@
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 
 import { collapseDictationDuplicate } from '../domain/dictation';
-import { tileAt, uid } from '../domain/logic';
+import { prettyDate, tileAt, uid } from '../domain/logic';
 import type { PlanStep } from '../domain/types';
 import { useApp } from '../state/AppStateContext';
 import { GhostButton, PrimaryButton } from '../ui/components';
 import { SheetShell } from '../ui/SheetShell';
 import { SuggestionPicker } from '../ui/SuggestionPicker';
 import { colors, radius, space, type } from '../ui/theme';
+
+const DEADLINE_WEB_PRESETS = [
+  { label: '1 week', days: 7 },
+  { label: '30 days', days: 30 },
+  { label: '90 days', days: 90 },
+];
 
 /** Everything deeper than the quick-actions sheet (TileSheetScreen) lives here, reached
  *  via its "✎ Edit": retyping the tile's own label/note, swapping it for a different
@@ -18,14 +25,21 @@ import { colors, radius, space, type } from '../ui/theme';
  *  already dimming the grid — painting a second scrim here would double-darken it. */
 export default function TileEditScreen({ route, navigation }: any) {
   const cell: number = route.params?.cell ?? 0;
-  const cardId: string = route.params?.cardId;
-  const { state, setTile, updateTileContent, setTilePlan } = useApp();
-  const card = state.cards.find((c) => c.id === cardId);
+  const scheduleId: string = route.params?.scheduleId;
+  const { state, createGoal, setTile, updateTileContent, setTilePlan, setTileDeadline } = useApp();
+  const schedule = state.schedules.find((s) => s.id === scheduleId);
+  const card = schedule?.instances[schedule.instances.length - 1];
   const tile = card ? tileAt(card, cell) : undefined;
 
-  const [label, setLabel] = useState(tile?.label ?? '');
+  const [label, setLabel] = useState(tile?.title ?? '');
   const [note, setNote] = useState(tile?.note ?? '');
   const [showSwap, setShowSwap] = useState(false);
+  const [showDeadlinePicker, setShowDeadlinePicker] = useState(false);
+  // iOS's spinner fires onChange continuously as each wheel column settles mid-scroll —
+  // same buffering fix as SettingsScreen's TimeSlots, for the same reason: committing
+  // straight from onChange would grab an intermediate value, not the one actually
+  // settled on. Android's picker is a modal dialog that only calls onChange once.
+  const [pendingDeadline, setPendingDeadline] = useState(new Date(Date.now() + 7 * 86_400_000));
 
   const [addingStep, setAddingStep] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -49,7 +63,7 @@ export default function TileEditScreen({ route, navigation }: any) {
   const plan = tile.plan ?? [];
 
   const saveContent = () => {
-    updateTileContent(cardId, cell, { label, note });
+    updateTileContent(scheduleId, cell, { title: label, note });
     close();
   };
 
@@ -57,14 +71,14 @@ export default function TileEditScreen({ route, navigation }: any) {
     const title = newTitle.trim();
     if (!title) return;
     const step: PlanStep = { id: uid('step'), title, detail: newDetail.trim() || undefined, done: false };
-    setTilePlan(cardId, cell, [...plan, step]);
+    setTilePlan(scheduleId, cell, [...plan, step]);
     setNewTitle('');
     setNewDetail('');
     setAddingStep(false);
   };
 
   const toggleStepDone = (id: string) => {
-    setTilePlan(cardId, cell, plan.map((s) => (s.id === id ? { ...s, done: !s.done } : s)));
+    setTilePlan(scheduleId, cell, plan.map((s) => (s.id === id ? { ...s, done: !s.done } : s)));
   };
 
   const beginStepEdit = (step: PlanStep) => {
@@ -76,7 +90,7 @@ export default function TileEditScreen({ route, navigation }: any) {
   const saveStepEdit = () => {
     if (!editingStepId) return;
     setTilePlan(
-      cardId,
+      scheduleId,
       cell,
       plan.map((s) => (s.id === editingStepId ? { ...s, title: editTitle.trim() || s.title, detail: editDetail.trim() || undefined } : s))
     );
@@ -84,7 +98,7 @@ export default function TileEditScreen({ route, navigation }: any) {
   };
 
   const deleteStep = (id: string) => {
-    setTilePlan(cardId, cell, plan.filter((s) => s.id !== id));
+    setTilePlan(scheduleId, cell, plan.filter((s) => s.id !== id));
     setEditingStepId(null);
   };
 
@@ -116,6 +130,72 @@ export default function TileEditScreen({ route, navigation }: any) {
       />
       <PrimaryButton label="Save changes" tone="clay" onPress={saveContent} style={{ marginTop: space.md }} />
 
+      {/* A deadline for this one goal, this one card cycle — not the underlying Goal, and
+          separate from the card's own timeline (CreateCardScreen's "Set a timeline for
+          this card"). Commits immediately on pick/clear, same as the plan steps below,
+          rather than waiting on "Save changes" (which only covers label/note). */}
+      <Text style={[styles.sectionLabel, { marginTop: space.lg }]}>DEADLINE</Text>
+      {tile.deadline ? (
+        <View style={styles.deadlineRow}>
+          <Text style={styles.deadlineText}>Due {prettyDate(tile.deadline)}</Text>
+          <Pressable onPress={() => setTileDeadline(scheduleId, cell, undefined)} hitSlop={8}>
+            <Text style={styles.deadlineClear}>Clear</Text>
+          </Pressable>
+        </View>
+      ) : Platform.OS === 'web' ? (
+        <View style={styles.chips}>
+          {DEADLINE_WEB_PRESETS.map((p) => (
+            <Pressable
+              key={p.days}
+              onPress={() => setTileDeadline(scheduleId, cell, Date.now() + p.days * 86_400_000)}
+              style={styles.chip}
+            >
+              <Text style={styles.chipText}>+{p.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : (
+        <>
+          <GhostButton
+            label="+ Set a deadline"
+            onPress={() => {
+              setPendingDeadline(new Date(Date.now() + 7 * 86_400_000));
+              setShowDeadlinePicker(true);
+            }}
+          />
+          {showDeadlinePicker && (
+            <DateTimePicker
+              value={pendingDeadline}
+              mode="date"
+              minimumDate={new Date()}
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              onChange={(event: DateTimePickerEvent, date?: Date) => {
+                if (Platform.OS === 'android') {
+                  setShowDeadlinePicker(false);
+                  // Android's dismiss action still calls onChange with the picker's
+                  // *original* value, not undefined — `event.type` is the only reliable
+                  // way to tell a real pick apart from a cancel (confirmed from the
+                  // library's own source: DISMISS_ACTION fires onChange(event, originalValue)).
+                  if (event.type !== 'dismissed' && date) setTileDeadline(scheduleId, cell, date.getTime());
+                  return;
+                }
+                if (date) setPendingDeadline(date);
+              }}
+            />
+          )}
+          {Platform.OS === 'ios' && showDeadlinePicker && (
+            <GhostButton
+              label="Done"
+              onPress={() => {
+                setTileDeadline(scheduleId, cell, pendingDeadline.getTime());
+                setShowDeadlinePicker(false);
+              }}
+              style={{ marginTop: space.xs }}
+            />
+          )}
+        </>
+      )}
+
       {!showSwap ? (
         <GhostButton label="Swap for a different idea" onPress={() => setShowSwap(true)} style={{ marginTop: space.lg }} />
       ) : (
@@ -125,7 +205,19 @@ export default function TileEditScreen({ route, navigation }: any) {
             <SuggestionPicker
               usedBankIds={usedBankIds}
               onPicked={(seed) => {
-                setTile(cardId, cell, seed);
+                // Same fast-path defaults as a fresh fill (TileSheetScreen) — difficulty
+                // and type are editable later from the goal library, never a mandatory
+                // prompt before a swap can finish.
+                const goal = createGoal({
+                  title: seed.label,
+                  difficulty: 'medium',
+                  type: 'oneOff',
+                  emoji: seed.emoji,
+                  note: seed.note,
+                  category: seed.category,
+                  bankId: seed.bankId,
+                });
+                setTile(scheduleId, cell, goal.id);
                 close();
               }}
             />
@@ -242,6 +334,19 @@ const styles = StyleSheet.create({
   headerTitle: { flex: 1, marginRight: space.sm, fontSize: 22 },
   close: { fontFamily: 'Manrope_700Bold', fontSize: 13, color: colors.inkQuietFaint, paddingTop: 4 },
   sectionLabel: { fontFamily: 'Manrope_800ExtraBold', fontSize: 11, letterSpacing: 1.2, color: colors.inkQuietFaint, marginBottom: space.xs },
+  deadlineRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  deadlineText: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.ink },
+  deadlineClear: { fontFamily: 'Manrope_700Bold', fontSize: 12, color: colors.danger },
+  chips: { flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' },
+  chip: {
+    borderWidth: 1,
+    borderColor: colors.lineQuiet,
+    borderRadius: 999,
+    paddingHorizontal: space.md,
+    paddingVertical: 8,
+    backgroundColor: colors.card,
+  },
+  chipText: { fontFamily: 'Manrope_700Bold', fontSize: 13, color: colors.inkSoft },
   input: {
     backgroundColor: colors.card,
     borderRadius: radius.md,

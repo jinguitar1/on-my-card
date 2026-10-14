@@ -18,9 +18,10 @@ import { colors, space, type } from '../ui/theme';
  *  you actually open the card (CardDetailScreen's own focus banner) — this screen's only
  *  job is to make someone want to tap through and keep going. */
 export default function TodayScreen({ route, navigation }: any) {
-  const cardId: string = route.params?.cardId;
+  const scheduleId: string = route.params?.scheduleId;
   const { state } = useApp();
-  const card = state.cards.find((c) => c.id === cardId);
+  const schedule = state.schedules.find((s) => s.id === scheduleId);
+  const card = schedule?.instances[schedule.instances.length - 1];
 
   const companion = card ? companionState(card) : null;
   const prevStageRef = useRef(companion?.stage ?? 0);
@@ -67,7 +68,7 @@ export default function TodayScreen({ route, navigation }: any) {
 
           <Text style={[type.quietQuote, styles.line]}>{line}</Text>
 
-          <Pressable style={styles.primaryBtn} onPress={() => navigation.navigate('CardDetail', { cardId })}>
+          <Pressable style={styles.primaryBtn} onPress={() => navigation.navigate('CardDetail', { scheduleId })}>
             <Text style={styles.primaryBtnText}>Open your card →</Text>
           </Pressable>
         </View>

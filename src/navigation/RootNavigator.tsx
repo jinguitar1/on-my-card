@@ -94,7 +94,7 @@ export default function RootNavigator() {
     );
   }
 
-  if (!state.settings.onboardingComplete || state.cards.length === 0) {
+  if (!state.settings.onboardingComplete || state.schedules.length === 0) {
     return <OnboardingNavigator />;
   }
 

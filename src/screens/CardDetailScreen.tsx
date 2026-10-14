@@ -19,13 +19,14 @@ import { RadarChart } from '../ui/RadarChart';
  *  (focus banner, bingo/crossed pills) live only here — the dashboard itself never
  *  shows any of it, by design (see CardDashboardScreen). */
 export default function CardDetailScreen({ route, navigation }: any) {
-  const cardId: string = route.params?.cardId;
-  const { state, setFocusedTile, renameCard, deleteCard, shuffleCard } = useApp();
+  const scheduleId: string = route.params?.scheduleId;
+  const { state, setFocusedTile, renameSchedule, deleteSchedule, shuffleCurrentInstance } = useApp();
   const { width } = useWindowDimensions();
-  const card = state.cards.find((c) => c.id === cardId);
+  const schedule = state.schedules.find((s) => s.id === scheduleId);
+  const card = schedule?.instances[schedule.instances.length - 1];
 
   const [editingTitle, setEditingTitle] = useState(false);
-  const [titleDraft, setTitleDraft] = useState(card?.title ?? '');
+  const [titleDraft, setTitleDraft] = useState(schedule?.title ?? '');
   // ✕ on the focus banner dismisses the banner *and* stops the tunnel-vision dimming —
   // every tile goes back to normal so the rest of the card is visible again, but the
   // focused tile keeps its own glow + a small ★ badge (CardTile's `isFocused`) so it's
@@ -66,7 +67,7 @@ export default function CardDetailScreen({ route, navigation }: any) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!card) {
+  if (!card || !schedule) {
     navigation.goBack();
     return null;
   }
@@ -78,7 +79,7 @@ export default function CardDetailScreen({ route, navigation }: any) {
   const nearMiss = new Map(nearMissLines(card).map((n) => [n.missingCell, colors.stampGold]));
 
   const confirmDelete = () => {
-    deleteCard(cardId);
+    deleteSchedule(scheduleId);
     setConfirmingDelete(false);
     // Not goBack(): CardDetail now sits two levels deep (Dashboard -> Today ->
     // CardDetail), so a single goBack() landed back on Today for the card that was
@@ -110,7 +111,7 @@ export default function CardDetailScreen({ route, navigation }: any) {
               onChangeText={(t) => setTitleDraft(collapseDictationDuplicate(t))}
               onBlur={() => {
                 setEditingTitle(false);
-                renameCard(cardId, titleDraft);
+                renameSchedule(scheduleId, titleDraft);
               }}
               autoFocus
               selectTextOnFocus
@@ -119,12 +120,12 @@ export default function CardDetailScreen({ route, navigation }: any) {
           ) : (
             <Pressable
               onPress={() => {
-                setTitleDraft(card.title);
+                setTitleDraft(schedule.title);
                 setEditingTitle(true);
               }}
               style={{ flex: 1 }}
             >
-              <Text style={[type.quietCardTitle, { fontSize: 30 }]}>{card.title}</Text>
+              <Text style={[type.quietCardTitle, { fontSize: 30 }]}>{schedule.title}</Text>
             </Pressable>
           )}
         </View>
@@ -138,11 +139,11 @@ export default function CardDetailScreen({ route, navigation }: any) {
             <View style={{ flex: 1 }}>
               <Text style={styles.focusBannerKicker}>FOCUS TILE</Text>
               <Text style={styles.focusBannerText} numberOfLines={1}>
-                {focusedTile.emoji} {focusedTile.label}
+                {focusedTile.emoji} {focusedTile.title}
               </Text>
             </View>
             <Pressable
-              onPress={() => navigation.navigate('TileEdit', { cardId, cell: focusedTile.cell })}
+              onPress={() => navigation.navigate('TileEdit', { scheduleId, cell: focusedTile.cell })}
               hitSlop={8}
               style={styles.focusBannerSteps}
             >
@@ -197,11 +198,11 @@ export default function CardDetailScreen({ route, navigation }: any) {
                   size={layout.cell}
                   isFocused={focused}
                   quiet
-                  label={tile?.label ?? '＋'}
+                  label={tile?.title ?? '＋'}
                   emoji={tile?.emoji}
                   crossed={crossed}
                   oneAwayColor={!crossed ? nearMiss.get(cell) : undefined}
-                  onPress={() => navigation.navigate('TileSheet', { cell, cardId })}
+                  onPress={() => navigation.navigate('TileSheet', { cell, scheduleId })}
                 />
               </View>
             );
@@ -274,7 +275,7 @@ export default function CardDetailScreen({ route, navigation }: any) {
         confirmLabel="Shuffle"
         onConfirm={() => {
           setConfirmingShuffle(false);
-          shuffleCard(cardId);
+          shuffleCurrentInstance(scheduleId);
         }}
         onCancel={() => setConfirmingShuffle(false)}
       />
@@ -282,7 +283,7 @@ export default function CardDetailScreen({ route, navigation }: any) {
       <ConfirmDialog
         visible={confirmingDelete}
         title="Delete this card?"
-        message={`"${card.title}" and everything on it will be permanently deleted. This can't be undone.`}
+        message={`"${schedule.title}" and everything on it will be permanently deleted. This can't be undone.`}
         confirmLabel="Delete"
         destructive
         onConfirm={confirmDelete}

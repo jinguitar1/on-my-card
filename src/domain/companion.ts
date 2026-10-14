@@ -1,10 +1,10 @@
 /**
  * Pure growth-stage + daily-line selectors for the companion (src/ui/Companion.tsx).
- * Nothing here is new persisted state — every input already exists on `Card`.
+ * Nothing here is new persisted state — every input already exists on `CardInstance`.
  */
 
-import { bingoCount, cardSummary, isCardComplete, nearMissLines, tileAt } from './logic';
-import type { Card } from './types';
+import { cardSummary, isCardComplete, nearMissLines, tileAt } from './logic';
+import type { CardInstance } from './types';
 
 export type CompanionStage = 0 | 1 | 2 | 3 | 4;
 
@@ -52,9 +52,9 @@ const STAGE_LABELS: Record<CompanionStage, string> = {
   4: 'Card Complete',
 };
 
-export function companionState(card: Card): CompanionState {
-  const { crossed, total, bingos } = cardSummary(card);
-  const complete = isCardComplete(card);
+export function companionState(instance: CardInstance): CompanionState {
+  const { crossed, total, bingos } = cardSummary(instance);
+  const complete = isCardComplete(instance);
   const stage: CompanionStage = complete ? 4 : bingos >= 12 ? 3 : bingos >= 6 ? 2 : bingos >= 1 ? 1 : 0;
   const pct = total > 0 ? (crossed / total) * 100 : 0;
   return { stage, label: STAGE_LABELS[stage], mood: moodForPct(pct), pct, crossed, total, bingos, isComplete: complete };
@@ -79,13 +79,13 @@ const STAGE_LINES: Record<CompanionStage, string[]> = {
 
 /** Prefers a real, specific near-miss nudge over generic stage copy, since "two more and
  *  that's a bingo" is a genuine observation about this exact card, not filler. */
-export function companionLine(card: Card, state: CompanionState): string {
+export function companionLine(instance: CardInstance, state: CompanionState): string {
   if (!state.isComplete) {
-    const misses = nearMissLines(card);
+    const misses = nearMissLines(instance);
     if (misses.length > 0) {
       const miss = pickForToday(misses);
-      const tile = tileAt(card, miss.missingCell);
-      if (tile) return `One tile from a bingo: ${tile.emoji ?? ''} ${tile.label} would do it.`.trim();
+      const tile = tileAt(instance, miss.missingCell);
+      if (tile) return `One tile from a bingo: ${tile.emoji ?? ''} ${tile.title} would do it.`.trim();
     }
   }
   return pickForToday(STAGE_LINES[state.stage]);
